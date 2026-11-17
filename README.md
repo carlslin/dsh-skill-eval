@@ -33,8 +33,8 @@ is a DSH plugin rather than a CLI.
 
 ## Screenshots
 
-| Skills board | MCP tab | Scoring settings |
-| --- | --- | --- |
+| Skills board                              | MCP tab                                  | Scoring settings                                   |
+| ----------------------------------------- | ---------------------------------------- | -------------------------------------------------- |
 | ![skills board](docs/ui/board-skills.png) | ![MCP tab](docs/ui/board-mcp-1.20.2.png) | ![config dialog](docs/ui/config-dialog-1.20.2.png) |
 
 More real-window screenshots and the per-screen notes:
@@ -81,7 +81,7 @@ switches: [docs/ENTRYPOINTS.md](docs/ENTRYPOINTS.md).
 ```bash
 dsh-skill-eval-doctor   # packaging pre-flight (release gate with --release)
 dsh-skill-eval-accept   # generation & data contract (17 checks)
-dsh-skill-eval-verify   # product surfaces (9 checks, after a reload)
+dsh-skill-eval-verify   # product surfaces (7 checks + 2 manual, after a reload)
 ```
 
 ## Install
@@ -166,7 +166,7 @@ the matching `dist/` artifact.
 Editing `client/*.js` requires rebuilding the single-file browser bundle:
 
 ```bash
-npm run build          # format check → lint → client build → doctor → 241 tests
+npm run build          # format check → lint → client build → doctor → 258 tests
 npm run build:fast     # client build + doctor only
 npm run build:pack     # full build + dist/dsh-skill-eval-<version>.tgz
 npm run build:install  # pack + install into the desktop profile
@@ -181,7 +181,7 @@ npm run build:install  # pack + install into the desktop profile
 node --test test/
 ```
 
-241 tests (`npm test` rebuilds the browser bundle first): scoring bands, static checks, correction detection,
+258 tests (`npm test` rebuilds the browser bundle first): scoring bands, static checks, correction detection,
 window lifecycle (turn-end snapshot → correction → close), store round-trip with
 a torn line, analyzer join, markdown/HTML rendering incl. escaping and bilingual
 advice copy, host route registration under duplicate-route pressure, and the
@@ -205,4 +205,4 @@ client surfaces mounted in jsdom.
 - Loads are recorded from `skill` tool calls and user-typed `/skill-name` invocations; a skill the harness activates without either is invisible.
 - Effectiveness is inferred from the next user message, not from a task verdict.
 - Advice evidence keeps measured ids/numbers in English even in the Chinese UI.
-- Telemetry grows without pruning (one small record pair per load).
+- Telemetry grows without pruning: each load writes a skill/window pair, each resolved skill also a `static` profile, and every agent step one `step` row (the dominant growth in long sessions).

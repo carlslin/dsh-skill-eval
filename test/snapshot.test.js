@@ -176,6 +176,49 @@ test('one board is written per settled turn and the turn list reads it back', as
   }
 })
 
+test('a settled turn writes its own board, not the globally newest turn', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-turns-'))
+  const report = {
+    ...REPORT,
+    turnLoads: [
+      { sessionId: 'session-a', turn: 2, skills: ['pdf-tools'], firstAt: 1, lastAt: 2 },
+      { sessionId: 'session-b', turn: 9, skills: ['pdf-tools'], firstAt: 3, lastAt: 4 },
+    ],
+  }
+  try {
+    const snapshots = createSnapshots({ analyzer: fakeAnalyzer(report), dir, debounceMs: 60000, turnReports: true })
+    snapshots.request({ sessionId: 'session-a', turn: 2 })
+    await snapshots.writeNow()
+    const rows = await listTurnReports(dir)
+    assert.deepEqual(
+      rows.map((row) => [row.sessionId, row.turn]),
+      [['session-a', 2]],
+    )
+    await snapshots.dispose()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a settled turn that loaded no skill does not overwrite another board', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-turns-'))
+  try {
+    const snapshots = createSnapshots({
+      analyzer: fakeAnalyzer(TURN_REPORT),
+      dir,
+      debounceMs: 60000,
+      turnReports: true,
+    })
+    snapshots.request({ sessionId: 'session-other', turn: 12 })
+    await snapshots.writeNow()
+    assert.equal((await listTurnReports(dir)).length, 0)
+    assert.match(await readFile(path.join(dir, 'latest.json'), 'utf8'), /pdf-tools/)
+    await snapshots.dispose()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('per-turn boards are trimmed to the configured count', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-turns-'))
   try {

@@ -12,6 +12,7 @@ import {
   readSetting,
   renderConfigHtml,
   saveSettings,
+  updateSettings,
   SETTINGS_FIELDS,
   SETTINGS_GROUPS,
 } from '../lib/settings.js'
@@ -64,6 +65,21 @@ test('settings writes are serialized and atomic', async () => {
         (values.maxAdvice === 5 && values.minSamples === undefined),
       'one complete write wins',
     )
+    await assert.rejects(access(path.join(dir, 'settings.json.tmp')))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('concurrent partial updates keep every field', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'sev-settings-'))
+  try {
+    await updateSettings(dir, { minSamples: 4 })
+    await Promise.all([updateSettings(dir, { maxAdvice: 5 }), updateSettings(dir, { pruneMinLoads: 9 })])
+    const values = await loadSettings(dir)
+    assert.equal(values.minSamples, 4)
+    assert.equal(values.maxAdvice, 5)
+    assert.equal(values.pruneMinLoads, 9)
     await assert.rejects(access(path.join(dir, 'settings.json.tmp')))
   } finally {
     await rm(dir, { recursive: true, force: true })

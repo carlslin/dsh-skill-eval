@@ -31,8 +31,8 @@
 
 ## 截图
 
-| 技能看板 | MCP 标签 | 评分配置 |
-| --- | --- | --- |
+| 技能看板                              | MCP 标签                                  | 评分配置                                      |
+| ------------------------------------- | ----------------------------------------- | --------------------------------------------- |
 | ![技能看板](docs/ui/board-skills.png) | ![MCP 标签](docs/ui/board-mcp-1.20.2.png) | ![评分配置](docs/ui/config-dialog-1.20.2.png) |
 
 更多真实窗口截图与逐屏记录：[docs/UI-REVIEW.md](docs/UI-REVIEW.md)。
@@ -69,7 +69,7 @@
 ```bash
 dsh-skill-eval-doctor   # 打包预检（--release 为发布门禁）
 dsh-skill-eval-accept   # 数据契约与生成检查（17 项）
-dsh-skill-eval-verify   # 产品面可达（9 项，重载后）
+dsh-skill-eval-verify   # 产品面可达（7 项 + 2 项手动，重载后）
 ```
 
 ## 安装
@@ -139,7 +139,7 @@ registerReviewTool: true # skill_eval_review：泄漏审查 + 审计账本
 node --test test/
 ```
 
-241 项（`npm test` 会先重建客户端 bundle）：评分分档、静态检查、纠正识别、窗口生命周期（回合结束快照 →
+258 项（`npm test` 会先重建客户端 bundle）：评分分档、静态检查、纠正识别、窗口生命周期（回合结束快照 →
 纠正 → 关闭）、带残缺行的存储往返、分析器 join、Markdown/HTML 渲染（含转义与中文
 建议文案）、重复路由压力下的宿主路由注册，以及客户端的 jsdom 挂载测试。
 

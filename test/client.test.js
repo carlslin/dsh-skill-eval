@@ -307,8 +307,18 @@ async function mountClient(options = {}, overrides = {}) {
         },
       }
     }
+    if (options.versionedHtml && target.startsWith('/skill-eval/data/') && !target.endsWith('/data')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/html; charset=utf-8' },
+        async json() {
+          return null
+        },
+      }
+    }
     if (target.includes('/settings')) {
-      if (options.settingsHtml) {
+      if (options.settingsHtml || (options.settingsVersionedHtml && !target.endsWith('/settings'))) {
         return {
           ok: true,
           status: 200,
@@ -327,10 +337,13 @@ async function mountClient(options = {}, overrides = {}) {
         },
       }
     }
-    const body = options.report ?? REPORT
+    const sequence = Array.isArray(options.reportSequence) ? options.reportSequence : null
+    const body =
+      sequence && sequence.length > 1 ? sequence.shift() : (sequence && sequence[0]) || options.report || REPORT
     return {
       ok: true,
       status: 200,
+      headers: { get: () => 'application/json' },
       async json() {
         return body
       },
@@ -618,7 +631,14 @@ test('the turn card renders under the turn that loaded a skill and hides elsewhe
   const TurnCard = registrations.find((item) => item.registration.name === 'conversation.chat.turnTail').Component
   const nodes = new Map([
     ['a', { kind: 'tool-call', location: { kind: 'step', turn: { turn: 2 } } }],
-    ['b', { kind: 'tool-call', location: { kind: 'step', turn: { turn: 2 } }, data: { isError: true } }],
+    [
+      'b',
+      {
+        kind: 'tool-call',
+        location: { kind: 'step', turn: { turn: 2 } },
+        data: { root: { kind: 'tool-result', isError: true } },
+      },
+    ],
   ])
   const useChat = (selector) => selector({ nodes })
 
@@ -992,6 +1012,67 @@ test('the popup falls back to the unversioned route when the host predates it', 
   assert.equal(fetched[0].startsWith('/skill-eval/data/'), true)
   assert.equal(fetched[1], '/skill-eval/data')
   assert.match(window.document.querySelector('[role="dialog"]').textContent, /pdf-tools/)
+})
+
+test('a versioned data route that answers HTML falls back to the canonical JSON route', async () => {
+  const { window, registrations, fetched, React } = await mountClient({ versionedHtml: true }, { popup: true })
+  const FooterAction = registrations.find((r) => r.registration.name === 'sidebar.footer.action').Component
+  const Overlay = registrations.find((r) => r.registration.name === 'shell.overlay').Component
+  const { root } = createHost(window)
+  await act(async () => {
+    root.render(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(FooterAction, { wide: true }),
+        React.createElement(Overlay, null),
+      ),
+    )
+  })
+  const button = window.document.querySelector('button.sev-btn')
+  await act(async () => {
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  })
+  assert.equal(fetched[0].startsWith('/skill-eval/data/'), true)
+  assert.equal(fetched[1], '/skill-eval/data')
+  assert.match(window.document.querySelector('[role="dialog"]').textContent, /pdf-tools/)
+})
+
+test('a versioned settings route that answers HTML falls back to the canonical API', async () => {
+  const { window, registrations, React } = await mountClient({ settingsVersionedHtml: true })
+  const RowConfig = registrations.find((item) => item.registration.name === 'plugins.bundle.config').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(RowConfig, { view: 'page' }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  assert.doesNotMatch(host.textContent, /重启 DeepSeek Harness/)
+  assert.match(host.textContent, /评分配置|Scoring settings/)
+})
+
+test('the turn strip retries when the cached report predates the turn', async () => {
+  const older = { ...REPORT, turnLoads: [] }
+  const { window, registrations, React } = await mountClient({ reportSequence: [older, REPORT] })
+  const TurnCard = registrations.find((item) => item.registration.name === 'conversation.chat.turnTail').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(
+      React.createElement(TurnCard, {
+        sessionId: 'session-abc',
+        turn: { turn: 2, status: 'closed' },
+        useChat: (selector) => selector({ nodes: new Map() }),
+      }),
+    )
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  })
+  assert.match(host.textContent, /pdf-tools/)
 })
 
 test('an older-generation payload shows the restart banner instead of pretending', async () => {

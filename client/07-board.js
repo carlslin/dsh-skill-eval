@@ -25,11 +25,15 @@ function BoardPanel() {
   // denied there), so the dialog is the entry point that always works.
   useEffect(() => {
     if (!configOpen) return undefined
+    const opener = typeof document !== 'undefined' ? document.activeElement : null
     const onKey = (event) => {
       if (event.key === 'Escape') setConfigOpen(false)
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      if (opener && typeof opener.focus === 'function') opener.focus()
+    }
   }, [configOpen])
   const data = state.data
   const skills = (data && data.skills) || []
@@ -50,9 +54,7 @@ function BoardPanel() {
   const trapFocus = (event) => {
     if (event.key !== 'Tab') return
     const focusable = [
-      ...event.currentTarget.querySelectorAll(
-        'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
-      ),
+      ...event.currentTarget.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'),
     ].filter((node) => !node.disabled && node.offsetParent !== null)
     if (focusable.length === 0) return
     const first = focusable[0]
@@ -75,7 +77,11 @@ function BoardPanel() {
   const needle = query.trim().toLowerCase()
   const visibleSkills = skills.filter(
     (entry) =>
-      (!onlyActionable || hasFix(entry)) && (needle.length === 0 || entry.skill.toLowerCase().includes(needle)),
+      (!onlyActionable || hasFix(entry)) &&
+      (needle.length === 0 ||
+        String(entry.skill ?? '')
+          .toLowerCase()
+          .includes(needle)),
   )
   const updated =
     data && data.generatedAt && Number.isFinite(Date.parse(data.generatedAt))
@@ -116,9 +122,23 @@ function BoardPanel() {
                 key: view,
                 type: 'button',
                 role: 'tab',
+                id: 'sev-board-tab-' + view,
+                'aria-controls': 'sev-board-view',
                 'aria-selected': state.view === view,
+                tabIndex: state.view === view ? 0 : -1,
                 className: 'sev-tab' + (state.view === view ? ' sev-tab--on' : ''),
                 onClick: () => setView(view),
+                onKeyDown: (event) => {
+                  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                  event.preventDefault()
+                  const views = ['skills', 'steps', 'runs', 'mcp', 'dev']
+                  const index = views.indexOf(view)
+                  const next = views[(index + (event.key === 'ArrowRight' ? 1 : views.length - 1)) % views.length]
+                  setView(next)
+                  const target =
+                    typeof document !== 'undefined' ? document.getElementById('sev-board-tab-' + next) : null
+                  if (target) target.focus()
+                },
               },
               t.tabs[view],
             ),
@@ -196,32 +216,36 @@ function BoardPanel() {
           ),
         )
       : null,
-    state.view === 'skills'
-      ? !state.loading && !state.error && skills.length === 0
-        ? h('div', { className: 'sev-empty' }, t.empty)
-        : visibleSkills.length === 0
-          ? h('div', { className: 'sev-empty' }, t.noMatch)
-          : visibleSkills.map((skill) =>
-              h(SkillCard, {
-                key: skill.skill,
-                skill,
-                t,
-                lang,
-                onTrace: (name) => store.set((current) => ({ ...current, view: 'steps', stepFilter: name })),
-              }),
-            )
-      : state.view === 'steps'
-        ? h(StepsView, {
-            data,
-            t,
-            filter: state.stepFilter || '',
-            onFilter: (name) => store.set((current) => ({ ...current, stepFilter: name })),
-          })
-        : state.view === 'runs'
-          ? h(RunsView, { data, t })
-          : state.view === 'mcp'
-            ? h(McpView, { data, t, lang })
-            : h(DevView, { data, t }),
+    h(
+      'div',
+      { role: 'tabpanel', id: 'sev-board-view', 'aria-labelledby': 'sev-board-tab-' + state.view },
+      state.view === 'skills'
+        ? !state.loading && !state.error && skills.length === 0
+          ? h('div', { className: 'sev-empty' }, t.empty)
+          : visibleSkills.length === 0
+            ? h('div', { className: 'sev-empty' }, t.noMatch)
+            : visibleSkills.map((skill) =>
+                h(SkillCard, {
+                  key: skill.skill,
+                  skill,
+                  t,
+                  lang,
+                  onTrace: (name) => store.set((current) => ({ ...current, view: 'steps', stepFilter: name })),
+                }),
+              )
+        : state.view === 'steps'
+          ? h(StepsView, {
+              data,
+              t,
+              filter: state.stepFilter || '',
+              onFilter: (name) => store.set((current) => ({ ...current, stepFilter: name })),
+            })
+          : state.view === 'runs'
+            ? h(RunsView, { data, t })
+            : state.view === 'mcp'
+              ? h(McpView, { data, t, lang })
+              : h(DevView, { data, t }),
+    ),
     configOpen
       ? h(
           'div',
@@ -563,14 +587,16 @@ function McpView(props) {
           h(
             'div',
             { className: 'sev-advice-list' },
-            failing.slice(0, 8).map((tool) =>
-              h(
-                'div',
-                { className: 'sev-sub-row', key: tool.server + '/' + tool.tool },
-                h('span', null, tool.server + '/' + tool.tool),
-                h('b', null, (tool.errors || 0) + '/' + (tool.calls || 0)),
+            failing
+              .slice(0, 8)
+              .map((tool) =>
+                h(
+                  'div',
+                  { className: 'sev-sub-row', key: tool.server + '/' + tool.tool },
+                  h('span', null, tool.server + '/' + tool.tool),
+                  h('b', null, (tool.errors || 0) + '/' + (tool.calls || 0)),
+                ),
               ),
-            ),
           ),
         )
       : null,
@@ -615,13 +641,13 @@ function DevView(props) {
     [t.devLabels.api, DATA_URL],
     [
       t.devLabels.module,
-      (dev.moduleVersion ?? '—') +
-        ' / ' +
-        (dev.diskVersion ?? '—') +
-        (dev.skew ? ' ⚠ ' + t.devLabels.skew : ''),
+      (dev.moduleVersion ?? '—') + ' / ' + (dev.diskVersion ?? '—') + (dev.skew ? ' ⚠ ' + t.devLabels.skew : ''),
     ],
     [t.devLabels.routes, String(dev.routes ?? '—') + ' · ' + t.devLabels.tools + ' ' + String(dev.tools ?? '—')],
-    [t.devLabels.store, totals.storeError ? String(totals.storeError) : 'ok'],
+    [t.devLabels.settingsFile, dev.settingsFile || '—'],
+    [t.devLabels.warnings, String(dev.warnings ?? 0)],
+    [t.devLabels.inspect, dev.inspectProvider ? t.devLabels.ok : '—'],
+    [t.devLabels.store, totals.storeError ? String(totals.storeError) : t.devLabels.ok],
     [t.version, DATA_VERSION],
   ]
   return h(

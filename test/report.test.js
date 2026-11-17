@@ -5,7 +5,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { EventStore } from '../lib/store.js'
 import { renderMcpMarkdown } from '../lib/render.js'
-import { bootstrapCI, createAnalyzer, normalizeWeights, rankingOf, resolveThresholds } from '../lib/report.js'
+import {
+  bootstrapCI,
+  createAnalyzer,
+  normalizeWeights,
+  percentWeights,
+  rankingOf,
+  resolveThresholds,
+} from '../lib/report.js'
 
 const SKILLS = [
   {
@@ -254,7 +261,22 @@ test('the report carries an MCP health board and per-run rows', async () => {
   }
 })
 
-test('weights accept percent input and always normalise to 100%', () => {
+test('displayed weights always sum to 100 after rounding', () => {
+  const weights = normalizeWeights({ static: 2, reliability: 2, effectiveness: 2, efficiency: 1 })
+  const pct = percentWeights(weights)
+  assert.equal(
+    Object.values(pct).reduce((sum, value) => sum + value, 0),
+    100,
+  )
+  assert.deepEqual(percentWeights(normalizeWeights()), {
+    static: 30,
+    reliability: 25,
+    effectiveness: 30,
+    efficiency: 15,
+  })
+})
+
+test('normalizeWeights accepts relative and percent input', () => {
   const w = normalizeWeights({ static: 30, reliability: 25, effectiveness: 30, efficiency: 15 })
   assert.deepEqual(w, { static: 0.3, reliability: 0.25, effectiveness: 0.3, efficiency: 0.15 })
   const half = normalizeWeights({ static: 1, reliability: 1, effectiveness: 0, efficiency: 0 })
@@ -460,10 +482,19 @@ test('each scored skill carries a 95% interval over its loads', async () => {
   }
 })
 
+test('ranking is unknown, not significant, when no intervals exist', () => {
+  const ranking = rankingOf([
+    { skill: 'a', score: { total: 80, ci: null } },
+    { skill: 'b', score: { total: 70, ci: null } },
+  ])
+  assert.equal(ranking.significant, null)
+  assert.match(ranking.note, /not enough scored skills/)
+})
+
 test('ranking warns when two skills have overlapping intervals', () => {
   const entry = (skill, total, low, high) => ({ skill, score: { total, ci: { low, high } } })
-  assert.equal(rankingOf([]).significant, true)
-  assert.equal(rankingOf([entry('a', 88, 80, 95)]).significant, true)
+  assert.equal(rankingOf([]).significant, null)
+  assert.equal(rankingOf([entry('a', 88, 80, 95)]).significant, null)
   const tie = rankingOf([entry('a', 88, 80, 95), entry('b', 85, 78, 92)])
   assert.equal(tie.significant, false)
   assert.equal(tie.ties.length, 1)

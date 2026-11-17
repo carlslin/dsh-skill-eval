@@ -116,12 +116,18 @@ try {
 }
 add('locale-meta', localeOk, localeDetail)
 
-// the shipped client.js must match its source parts
-try {
-  await run(process.execPath, [path.join(root, 'scripts/build-client.mjs'), '--check'], { cwd: root })
-  add('client-build', true, 'client.js matches client/*.js')
-} catch {
-  add('client-build', false, 'client.js is stale: run `node scripts/build-client.mjs`')
+// the shipped client.js must match its source parts. A published tarball does
+// not ship client/ (only the built client.js), so a missing parts.json means
+// "packaged install" and there is nothing to compare against.
+if (await exists('client/parts.json')) {
+  try {
+    await run(process.execPath, [path.join(root, 'scripts/build-client.mjs'), '--check'], { cwd: root })
+    add('client-build', true, 'client.js matches client/*.js')
+  } catch {
+    add('client-build', false, 'client.js is stale: run `node scripts/build-client.mjs`')
+  }
+} else {
+  add('client-build', true, 'packaged install: client.js is prebuilt (client/ sources are not shipped)')
 }
 
 // the client half must reference the versioned data route it will fetch
@@ -160,6 +166,11 @@ const filesOk =
   declaredFiles.includes('cordis.patch.yml') &&
   declaredFiles.includes('icon.svg') &&
   declaredFiles.includes('docs/*.md') &&
+  declaredFiles.includes('locale') &&
+  declaredFiles.includes('scripts') &&
+  declaredFiles.includes('README.md') &&
+  declaredFiles.includes('CHANGELOG.md') &&
+  declaredFiles.includes('LICENSE') &&
   !declaredFiles.includes('docs')
 add(
   'package-files',
@@ -181,11 +192,35 @@ add(
 )
 if (process.argv.includes('--release')) {
   const artifact = `dist/${manifest.name}-${manifest.version}.tgz`
-  add(
-    'dist-artifact',
-    await exists(artifact),
-    (await exists(artifact)) ? artifact : `run "npm run release:pack" to build ${artifact}`,
-  )
+  if (!(await exists(artifact))) {
+    add('dist-artifact', false, `run "npm run release:pack" to build ${artifact}`)
+  } else {
+    try {
+      // Opening the tarball is the only way to catch a files-list edit that
+      // ships a manifest but drops a runtime file (locale, scripts, lib).
+      const { stdout } = await run('tar', ['-tzf', path.join(root, artifact)])
+      const entries = stdout.split('\n').filter(Boolean)
+      const required = [
+        'package/index.js',
+        'package/client.js',
+        'package/cordis.patch.yml',
+        'package/locale/en.json',
+        'package/locale/zh.json',
+        'package/scripts/doctor.mjs',
+      ]
+      const missing = required.filter((entry) => !entries.includes(entry))
+      const hasLib = entries.some((entry) => entry.startsWith('package/lib/') && entry.endsWith('.js'))
+      add(
+        'dist-artifact',
+        missing.length === 0 && hasLib,
+        missing.length === 0 && hasLib
+          ? `${artifact} (${entries.length} entries)`
+          : `missing ${missing.join(', ') || 'lib/*.js'}`,
+      )
+    } catch (error) {
+      add('dist-artifact', false, error instanceof Error ? error.message : String(error))
+    }
+  }
 }
 
 const failed = rows.filter((row) => !row.ok)

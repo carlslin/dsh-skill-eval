@@ -4,7 +4,20 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
-import { dashboardBase, expectedVersion, httpGet, resolveBaseUrl } from '../scripts/lib.mjs'
+import { dashboardBase, expectedVersion, httpGet, parseCliArgs, resolveBaseUrl } from '../scripts/lib.mjs'
+
+test('flags consume their values instead of leaking into the base URL', () => {
+  assert.deepEqual(parseCliArgs(['--data-dir', '/tmp/d']), { baseArg: null, values: { '--data-dir': '/tmp/d' } })
+  assert.deepEqual(parseCliArgs(['http://127.0.0.1:1', '--data-dir', '/tmp/d']), {
+    baseArg: 'http://127.0.0.1:1',
+    values: { '--data-dir': '/tmp/d' },
+  })
+  assert.deepEqual(parseCliArgs(['--data-dir=/tmp/d', 'http://h']), {
+    baseArg: 'http://h',
+    values: { '--data-dir': '/tmp/d' },
+  })
+  assert.deepEqual(parseCliArgs(['--release', '--data-dir', '/x']), { baseArg: null, values: { '--data-dir': '/x' } })
+})
 
 test('base URL precedence: argument, DSH_WEB_URL, relay bridge', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'sev-cli-'))

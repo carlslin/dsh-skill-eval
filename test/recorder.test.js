@@ -136,6 +136,18 @@ test('foldSamples attaches the latest window record to each load', async () => {
   }
 })
 
+test('foldSamples collapses a duplicated /skill-name invocation after a reload', () => {
+  const records = [
+    { t: 'skill', at: 1, sessionId: 's', callId: 'm1', skill: 'a', ok: true, via: 'invocation', windowId: 's:m1' },
+    { t: 'skill', at: 2, sessionId: 's', callId: 'm1', skill: 'a', ok: true, via: 'invocation', windowId: 's:m1' },
+    { t: 'skill', at: 3, sessionId: 's', callId: 'c2', skill: 'a', ok: true, windowId: 's:c2' },
+  ]
+  const folded = foldSamples(records)
+  assert.equal(folded.length, 1)
+  assert.equal(folded[0].samples.length, 2)
+  assert.equal(folded[0].samples.filter((sample) => sample.via === 'invocation').length, 1)
+})
+
 test('recorder captures a load, its window, the turn end and the follow-up correction', async () => {
   const { dir, store } = await tempStore()
   const ctx = fakeCtx()
@@ -239,11 +251,40 @@ test('a failing skill load is recorded with its error and opens no window', asyn
   const recorder = createRecorder(ctx, { windowToolCalls: 12 }, { store })
   try {
     toolResult(ctx, 'skill', { name: 'ghost' }, { isError: true, error: 'ENOENT: SKILL.md' })
+    // A failed load must not leave an in-memory window that turn-stopping or
+    // dispose later persists as evidence.
+    ctx.emit('agent/turn-stopping', { agent })
     const records = await settle(store)
     const skill = records.find((r) => r.t === 'skill')
     assert.equal(skill.ok, false)
     assert.match(skill.error, /ENOENT/)
     assert.equal(records.filter((r) => r.t === 'window').length, 0)
+    await recorder.dispose()
+    const after = await store.readAll()
+    assert.equal(after.filter((r) => r.t === 'window').length, 0)
+    assert.equal(after.filter((r) => r.t === 'skill').length, 1)
+  } finally {
+    await recorder.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a failing skill load does not supersede the previous skill window', async () => {
+  const { dir, store } = await tempStore()
+  const ctx = fakeCtx()
+  const recorder = createRecorder(ctx, { windowToolCalls: 12 }, { store })
+  try {
+    ctx.emit('agent/pre-step', { agent, turn: 1, step: 1, messages: [] }, () => 'next')
+    toolResult(ctx, 'skill', { name: 'alpha' })
+    ctx.emit('agent/pre-step', { agent, turn: 1, step: 2, messages: [] }, () => 'next')
+    toolResult(ctx, 'skill', { name: 'ghost' }, { isError: true, error: 'ENOENT: SKILL.md' })
+    ctx.emit('agent/turn-stopping', { agent })
+    const records = await settle(store)
+    const windows = records.filter((r) => r.t === 'window')
+    assert.equal(windows.length, 1)
+    assert.equal(windows[0].skill, 'alpha')
+    assert.equal(windows[0].closeReason, 'turn-end')
+    assert.equal(windows[0].otherSkills.includes('ghost'), false)
   } finally {
     await recorder.dispose()
     await rm(dir, { recursive: true, force: true })

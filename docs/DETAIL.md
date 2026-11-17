@@ -20,9 +20,11 @@ pass line) are borrowed from those projects. No code is copied.
 
 ## What is recorded
 
-Two append-only JSONL record types live in `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
-(override with `dataDir` or `DSH_SKILL_EVAL_DIR`). The session log is **never**
-written to — plugins must not append foreign event types to it.
+Five append-only JSONL record types live in `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
+(override with `dataDir` or `DSH_SKILL_EVAL_DIR`): `skill`, `window`, `static`
+(one authoring profile per resolved skill), `step` (one row per agent step) and
+`edit` (the review ledger). The session log is **never** written to — plugins
+must not append foreign event types to it.
 
 ```jsonc
 // written when a `skill` tool call completes
@@ -428,8 +430,11 @@ Known validity limits, stated as limits rather than fixed:
 
 ## Configuration keys
 
-All 25 settings, in the order the native form renders them. The form persists to
-`settings.json`; `dataDir`/`DSH_SKILL_EVAL_DIR` still wins for the data root.
+The config keys below are the ones worth documenting; the native form renders
+the 25 tunable settings (the authoritative list is `SETTINGS_FIELDS`). Several
+keys here are config-only (`dataDir`, `dashboardPath`, `registerTool`,
+`inspectProvider`). The form persists to `settings.json`;
+`dataDir`/`DSH_SKILL_EVAL_DIR` still wins for the data root.
 
 ```yaml
 enabled: true
@@ -440,7 +445,7 @@ weights: { static: 30, reliability: 25, effectiveness: 30, efficiency: 15 } # no
 thresholds: { excellent: 90, good: 80, pass: 70 } # A/B/C floors
 windowTtlMs: 1800000 # a run older than this is not blamed on a later message
 dataDir: ~/.dsh/skill-eval # optional override
-turnReports: true # one board per settled turn under reports/turns/
+turnReports: true # one aggregate snapshot per settled turn under reports/turns/
 turnReportsKeep: 50 # how many per-turn boards to retain
 reportOnTurnEnd: true # write reports/latest.md + latest.json after each turn (no tokens)
 tokenBudgetPerLoad: 20000 # billable tokens per load before efficiency/advice react

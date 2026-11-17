@@ -13,11 +13,12 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { runAcceptance } from '../lib/accept.js'
-import { dashboardBase, expectedVersion, resolveBaseUrl } from './lib.mjs'
+import { dashboardBase, expectedVersion, parseCliArgs, resolveBaseUrl } from './lib.mjs'
 
 const args = process.argv.slice(2)
-const baseArg = args.find((arg) => !arg.startsWith('--'))
-const dataDirFlag = args.indexOf('--data-dir')
+const parsedArgs = parseCliArgs(args)
+const baseArg = parsedArgs.baseArg
+const dataDirOverride = parsedArgs.values['--data-dir'] ? path.resolve(parsedArgs.values['--data-dir']) : null
 const resolved = await resolveBaseUrl(baseArg)
 const baseUrl = resolved.baseUrl
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -25,7 +26,7 @@ const currentVersion = expectedVersion(manifest.version)
 const version = typeof manifest.version === 'string' ? manifest.version : null
 
 async function findDataDir() {
-  if (dataDirFlag >= 0 && args[dataDirFlag + 1]) return path.resolve(args[dataDirFlag + 1])
+  if (dataDirOverride) return dataDirOverride
   const home = process.env.DSH_HOME || path.join(homedir(), '.dsh')
   const root = path.join(home, 'skill-eval')
   let candidates
@@ -158,10 +159,10 @@ function manifestVersion() {
 async function readFiles() {
   // The served report names the data directory it actually read; prefer it over
   // scanning profiles, which can pick a different profile with a newer mtime.
-  let dataDir = dataDirFlag >= 0 && args[dataDirFlag + 1] ? path.resolve(args[dataDirFlag + 1]) : null
+  let dataDir = dataDirOverride
   if (!dataDir) {
     try {
-      const served = JSON.parse(await fetchReport())
+      const served = await fetchReport()
       if (served && typeof served.dataDir === 'string' && served.dataDir.length > 0) dataDir = served.dataDir
     } catch {
       // fall back to the profile scan below

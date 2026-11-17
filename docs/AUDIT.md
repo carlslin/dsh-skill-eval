@@ -62,3 +62,21 @@ the fixes have regression tests (`test/audit-regressions.test.js`, `test/store.t
 - Threshold ordering (`excellent ≥ good ≥ pass`) is repaired at scoring time but
   not rejected at write time; settings `mcpErrorRatePercent` allows 0 while the
   Config schema requires ≥1.
+
+## 1.20.3 复核修正（Review corrections）
+
+1.20.3 的独立复核（宿主、客户端、测试/打包、另一模型）发现以下**原审计声明不成立**，现已修复并有回归测试：
+
+| 原声明                                         | 实际情况（1.20.2）                                                                                                    | 1.20.3                                                                                                                                 |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| #9 写请求已做同源围栏，rebinding 只剩读风险    | `Origin.host === Host` 在 rebinding 下两者都是攻击者域名；配置页 POST 不需要自定义头                                  | Host 也必须命中 `getOrigin()`/loopback 允许表；新增 DNS rebinding、缺失头、超大 body 的 403/413 测试；文档改为"写已围栏，读仍依赖宿主" |
+| #11 并发保存不再丢字段                         | 只串行化了写；读-改-写在队列外，两个并发 partial POST 会互相覆盖                                                      | 新增 `updateSettings()`：读+合并+临时文件+rename 全在同一队列 job；并发 partial 测试                                                   |
+| #15 accept 从 served report 读 dataDir         | `JSON.parse(await fetchReport())` 对已解析对象抛错并被吞掉，实际仍按 mtime 扫描；`--data-dir` 的值还会被当成 base URL | 直接使用返回对象；参数解析移到 `scripts/lib.mjs` 并测试                                                                                |
+| #6 坏记录不会炸报告                            | `window.mcp` 的嵌套 tool 条目未归一化，一条 null 就让 `/data`、看板、工具全 500                                       | 读路径逐层归一化 + score/report 双保险；回归测试                                                                                       |
+| 1.19 起 `dsh-skill-eval-doctor` 可做安装包预检 | 打出的 tarball 不含 `client/`，doctor 的 client-build 检查永远失败且给出的修复命令不可执行                            | 缺 `client/parts.json` 视为已打包安装；`--release` 实际打开 tarball 校验条目                                                           |
+| 设置"保存后立即生效"                           | `windowTtlMs`、`reportOnTurnEnd`、`turnReports`、`promptHint` 在 apply 时固化                                         | 全部运行时读取；快照与提示词开关无需重启                                                                                               |
+| 每回合看板                                     | 写入时取全局最新 `turnLoads`，并发会话/去抖窗口会写错或覆盖                                                           | `agent/turn-stopping` 传 sessionId+turn；一次去抖写入可为多个回合各写一份                                                              |
+| 回合结果条显示 calls/errors                    | 读 `data.isError`，但 DSH 契约是 `ToolChatData { root }`，错误数恒为 0；测试锁了错误形状                              | 改读 `root.isError`；缓存 10s 内没有本回合行时重试两次                                                                                 |
+| 失败加载不污染证据                             | 失败 `skill` 仍会 `openWindow`，turn-end 落盘并可能顶掉上一个技能窗口                                                 | 仅成功加载开窗；turn-end/dispose 后测试断言无 window                                                                                   |
+
+仍未消除的残余风险：DNS rebinding 的**读**（`/data` 可被同源 rebinding 页面读取）依赖 DSH 宿主级围栏；插件侧只围栏写。

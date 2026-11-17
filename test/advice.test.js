@@ -316,6 +316,19 @@ test('the noise floor keeps critical when the interval clears the threshold', ()
   assert.equal(ungated.find((item) => item.id === 'user-corrections').severity, 'critical')
 })
 
+test('the error-rate noise floor resamples calls, not windows', () => {
+  const windows = [{ toolCalls: 40, errors: 20 }, ...Array.from({ length: 9 }, () => ({ toolCalls: 1, errors: 0 }))]
+  const samples = windows.map((w) =>
+    sample({ window: { ...w, errorNames: [], corrections: [], otherSkills: [], turnEnded: true } }),
+  )
+  const stats = aggregate(samples)
+  assert.ok(stats.errRate > 0.4)
+  const advice = buildAdvice({ stats, static: null, score: { dimensions: {} }, minSamples: 3, windows })
+  const rule = advice.find((item) => item.id === 'post-load-errors')
+  assert.ok(rule, 'a 41% call error rate must not be hidden by the window hit-rate gate')
+  assert.match(rule.evidence, /41%/)
+})
+
 test('expensive loads produce a token-cost warning', () => {
   const windows = [1, 2, 3].map(() => ({
     toolCalls: 4,

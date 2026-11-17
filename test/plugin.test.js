@@ -260,7 +260,10 @@ test('the system-prompt hint can be turned off to drop its per-turn tokens', asy
   await withDataDir(async (dataDir) => {
     const { ctx, registered } = fakeCtx()
     apply(ctx, { enabled: true, dataDir, promptHint: false })
-    assert.equal(registered.sections.length, 0)
+    // The section stays registered so the switch can be flipped live, but its
+    // text is empty: zero prompt tokens while disabled.
+    assert.equal(registered.sections.length, 1)
+    assert.equal(registered.sections[0].text({}), '')
     assert.equal(
       registered.tools.some((tool) => tool.name === 'skill_eval_report'),
       true,
@@ -594,12 +597,17 @@ test('history and impact views answer the time-aware questions', async () => {
   })
 })
 
-function fakeHttp(method, urlPath, body = '') {
+function fakeHttp(method, urlPath, body = '', extraHeaders = {}) {
   const listeners = {}
   const req = {
     method,
     url: urlPath,
-    headers: { 'content-type': 'application/json', 'x-skill-eval-config': '1' },
+    headers: {
+      'content-type': 'application/json',
+      'x-skill-eval-config': '1',
+      host: '127.0.0.1:1234',
+      ...extraHeaders,
+    },
     on(event, handler) {
       listeners[event] = handler
     },
@@ -721,6 +729,51 @@ test('the settings API reads and writes overrides for the native config page', a
     const form = await call('POST', 'minSamples=3&adviceNoiseFloor=on')
     assert.equal(form.statusCode, 200)
     assert.equal(JSON.parse(form.body).values.minSamples, 3)
+  })
+})
+
+test('settings writes are same-origin fenced, including DNS rebinding', async () => {
+  await withDataDir(async (dataDir) => {
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, { enabled: true, dataDir })
+    const route = registered.routes.find((item) => item.kind === 'exact' && item.path === '/skill-eval/settings')
+    const call = async (headers) => {
+      const { req, res, flush } = fakeHttp('POST', '/skill-eval/settings', JSON.stringify({ minSamples: 5 }), headers)
+      const pending = route.handler(req, res)
+      flush()
+      await pending
+      return res
+    }
+
+    const crossSite = await call({ origin: 'http://evil.example', host: '127.0.0.1:1234' })
+    assert.equal(crossSite.statusCode, 403)
+    const missingHeader = await call({ 'x-skill-eval-config': undefined })
+    assert.equal(missingHeader.statusCode, 403)
+    // DNS rebinding: Origin and Host are both the attacker's own domain.
+    const rebound = await call({ origin: 'http://evil.example:1234', host: 'evil.example:1234' })
+    assert.equal(rebound.statusCode, 403)
+    const sameOrigin = await call({ origin: 'http://127.0.0.1:1234' })
+    assert.equal(sameOrigin.statusCode, 200)
+  })
+})
+
+test('settings writes reject oversized bodies before and during the stream', async () => {
+  await withDataDir(async (dataDir) => {
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, { enabled: true, dataDir })
+    const route = registered.routes.find((item) => item.kind === 'exact' && item.path === '/skill-eval/settings')
+
+    const declared = fakeHttp('POST', '/skill-eval/settings', '', { 'content-length': String(70 * 1024) })
+    const first = route.handler(declared.req, declared.res)
+    declared.flush()
+    await first
+    assert.equal(declared.res.statusCode, 413)
+
+    const streamed = fakeHttp('POST', '/skill-eval/settings', 'x'.repeat(70 * 1024))
+    const second = route.handler(streamed.req, streamed.res)
+    streamed.flush()
+    await second
+    assert.equal(streamed.res.statusCode, 413)
   })
 })
 

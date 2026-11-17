@@ -17,7 +17,7 @@ function base(overrides = {}) {
       { t: 'window', at: 3000 },
       { t: 'edit', at: 4000 },
     ],
-    store: { dir: '/data', failed: null, queue: [] },
+    store: { dir: '/data', failed: null, queued: 0 },
     tools: ['skill_eval_report', 'skill_eval_review'],
     inspectProvider: 'skill-eval',
     warnings: [],
@@ -52,7 +52,7 @@ test('missing telemetry, tools, routes and store failures are reported', () => {
       tools: [],
       inspectProvider: null,
       routes: ['/skill-eval/data'],
-      store: { dir: '/data', failed: 'ENOSPC', queue: ['x'] },
+      store: { dir: '/data', failed: 'ENOSPC', queued: 1 },
     }),
   )
   const codes = dev.findings.map((item) => item.code).sort()

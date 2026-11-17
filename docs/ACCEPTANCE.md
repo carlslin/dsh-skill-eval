@@ -66,6 +66,6 @@ The 1.20.0 four-layer audit and its fixes are recorded in [AUDIT.md](AUDIT.md).
 node --test test/                     # 239 passing (npm test builds the client first)
 node scripts/doctor.mjs --release     # release gate incl. dist artifact
 dsh-skill-eval-accept                 # 17 checks against the running host
-dsh-skill-eval-verify                 # 9 checks against the running host
+dsh-skill-eval-verify                 # 7 checks + 2 manual rows against the running host
 npm publish --dry-run                 # packaging/publishability preview
 ```

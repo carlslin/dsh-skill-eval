@@ -6,26 +6,53 @@ const unitLabel = (unit, lang) => (!unit ? '' : lang === 'zh' ? UNIT_ZH[unit] ||
 const settingsStore = createStore({ loading: false, saving: false, data: null, error: null, savedAt: 0 })
 const useSettings = () => useSyncExternalStore(settingsStore.subscribe, settingsStore.get, settingsStore.get)
 
-async function fetchSettings() {
-  settingsStore.set((state) => ({ ...state, loading: true, error: null }))
-  let response = await fetch(SETTINGS_URL, { headers: { accept: 'application/json' } })
-  if (response.status === 404)
-    response = await fetch(SETTINGS_URL_FALLBACK, { headers: { accept: 'application/json' } })
-  if (!response.ok) throw new Error('HTTP ' + response.status)
+// One generation counter for reads and writes: a slow GET must not overwrite
+// the values a newer save just persisted.
+let settingsGeneration = 0
+
+async function fetchSettingsPayload(url) {
+  const response = await fetch(url, { headers: { accept: 'application/json' } })
   const type =
     (response.headers && typeof response.headers.get === 'function' && response.headers.get('content-type')) || ''
-  if (type.indexOf('json') === -1) {
-    // The dashboard's stale prefix route answers HTML when this host still
-    // runs a generation from before the settings API existed.
-    throw new Error('host-too-old')
+  if (!response.ok || type.indexOf('json') === -1) {
+    // DSH's stale prefix route answers 200 HTML for an unclaimed subpath, so
+    // treat "not JSON" the same as 404 and try the canonical route.
+    const error = new Error(!response.ok ? 'HTTP ' + response.status : 'host-too-old')
+    error.status = response.status
+    error.notJson = type.indexOf('json') === -1
+    throw error
   }
-  const data = await response.json()
-  settingsStore.set((state) => ({ ...state, loading: false, data }))
+  return response.json()
+}
+
+async function fetchSettings() {
+  const generation = (settingsGeneration += 1)
+  const update = (patch) => {
+    if (generation === settingsGeneration) settingsStore.set((state) => ({ ...state, ...patch }))
+  }
+  update({ loading: true, error: null })
+  let data
+  try {
+    data = await fetchSettingsPayload(SETTINGS_URL)
+  } catch (error) {
+    const retry = error && (error.status === 404 || error.notJson)
+    if (!retry) throw error
+    try {
+      data = await fetchSettingsPayload(SETTINGS_URL_FALLBACK)
+    } catch (fallbackError) {
+      if (fallbackError && (fallbackError.status === 404 || fallbackError.notJson))
+        throw new Error('host-too-old', { cause: fallbackError })
+      throw fallbackError
+    }
+  }
+  update({ loading: false, data })
   return data
 }
 
 async function saveSettings(values) {
-  settingsStore.set((state) => ({ ...state, saving: true, error: null }))
+  // Invalidate any in-flight GET; its snapshot predates this save.
+  settingsGeneration += 1
+  settingsStore.set((state) => ({ ...state, saving: true, error: null, savedAt: 0 }))
   try {
     const post = (url) =>
       fetch(url, {
@@ -40,6 +67,7 @@ async function saveSettings(values) {
       settingsStore.set((state) => ({
         ...state,
         saving: false,
+        savedAt: 0,
         error: payload.errors?.[0]?.message ?? 'HTTP ' + response.status,
       }))
       return false
@@ -55,6 +83,7 @@ async function saveSettings(values) {
     settingsStore.set((state) => ({
       ...state,
       saving: false,
+      savedAt: 0,
       error: error instanceof Error ? error.message : String(error),
     }))
     return false
@@ -70,6 +99,8 @@ function SettingsForm(props) {
   const [draft, setDraft] = useState(null)
   useEffect(() => {
     let alive = true
+    // A success banner from a previous mount must not reappear on reopen.
+    settingsStore.set((current) => (current.savedAt ? { ...current, savedAt: 0 } : current))
     fetchSettings().catch((error) => {
       if (alive) settingsStore.set((current) => ({ ...current, loading: false, error: error.message }))
     })
@@ -82,8 +113,10 @@ function SettingsForm(props) {
   const groups = data && data.fields ? groupSettingsFields(data.fields, lang) : []
   const set = (key, value) => setDraft({ ...values, [key]: value })
   const save = async () => {
-    const ok = await saveSettings(values)
-    if (ok) setDraft(null)
+    const submitted = values
+    const ok = await saveSettings(submitted)
+    // Keep edits typed while the POST was in flight instead of discarding them.
+    if (ok) setDraft((current) => (current === null || current === submitted ? null : current))
   }
   if (state.loading && !data) return h('div', { className: 'sev-settings' }, t.settingsLoading)
   if (state.error && !data) {
@@ -98,7 +131,7 @@ function SettingsForm(props) {
             {
               type: 'button',
               className: 'sev-btn',
-              onClick: () => window.open(window.location.origin + CONFIG_URL, '_blank', 'noopener'),
+              onClick: () => window.open(configUrl(), '_blank', 'noopener'),
             },
             t.settingsOpenWeb,
           )
@@ -145,6 +178,8 @@ function SettingsForm(props) {
                   h('input', {
                     type: 'checkbox',
                     checked: values[field.key] === true,
+                    disabled: state.saving,
+                    'aria-label': lang === 'zh' ? field.labelZh || field.label : field.label,
                     onChange: (event) => set(field.key, event.currentTarget.checked),
                   }),
                   h('i', { 'aria-hidden': 'true' }),
@@ -158,6 +193,8 @@ function SettingsForm(props) {
                     max: field.max,
                     step: field.step,
                     value: values[field.key] ?? '',
+                    disabled: state.saving,
+                    'aria-label': lang === 'zh' ? field.labelZh || field.label : field.label,
                     onChange: (event) => set(field.key, event.currentTarget.value),
                   }),
                   field.unit ? h('em', null, unitLabel(field.unit, lang)) : null,
@@ -180,7 +217,7 @@ function SettingsForm(props) {
             {
               type: 'button',
               className: 'sev-btn sev-btn--ghost',
-              onClick: () => window.open(window.location.origin + CONFIG_URL, '_blank', 'noopener'),
+              onClick: () => window.open(configUrl(), '_blank', 'noopener'),
             },
             t.settingsOpenWeb,
           )

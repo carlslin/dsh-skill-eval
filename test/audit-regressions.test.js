@@ -236,3 +236,65 @@ test('a malformed edit timestamp cannot 500 the HTML board', () => {
   }
   assert.doesNotThrow(() => renderHtml(report, { lang: 'zh', base: '/skill-eval' }))
 })
+
+test('finite but out-of-range timestamps render as a dash instead of throwing', async () => {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    dataDir: '/data',
+    totals: { invocations: 1, skills: 1, closed: 1, open: 0, storeError: null },
+    scoring: { weightsPercent: {}, thresholds: {}, minSamples: 3 },
+    ranking: { significant: null },
+    validity: null,
+    edits: [{ at: 1e18, skill: 'sk', dimension: 'static', verdict: 'accept', hypothesis: 42 }],
+    mcpServers: [],
+    mcpAdvice: [],
+    runs: [],
+    skills: [],
+  }
+  assert.doesNotThrow(() => renderHtml(report, { lang: 'zh', base: '/skill-eval' }))
+  const { renderHistoryMarkdown } = await import('../lib/history.js')
+  assert.doesNotThrow(() =>
+    renderHistoryMarkdown({
+      skill: 'sk',
+      loads: [{ at: 1e18, ok: true, corrections: 0 }],
+      closed: 1,
+      trend: 'flat',
+      note: '',
+    }),
+  )
+})
+
+test('a corrupt nested MCP entry cannot crash the report or the board', async () => {
+  const mcp = JSON.parse(
+    '{"srv":{"calls":2,"errors":0,"samples":[10],"tools":{"good":{"calls":1,"errors":0,"ms":10,"samples":[10]},"bad":null,"nested":{"calls":"x"}}}}',
+  )
+  const records = [
+    { t: 'skill', v: 1, at: 1000, sessionId: 's', callId: 'c', skill: 'sk', ok: true, windowId: 'w' },
+    {
+      t: 'window',
+      v: 1,
+      at: 1100,
+      windowId: 'w',
+      sessionId: 's',
+      skill: 'sk',
+      toolCalls: 2,
+      errors: 0,
+      mcp,
+      corrections: [],
+      otherSkills: [],
+      turnEnded: true,
+    },
+  ]
+  await withAnalyzer(records, {}, async (analyzer) => {
+    const report = await analyzer.build()
+    const row = report.mcpServers.find((entry) => entry.server === 'srv')
+    assert.ok(row)
+    assert.equal(row.calls, 2)
+    assert.deepEqual(
+      row.tools.map((tool) => tool.tool),
+      ['good', 'nested'],
+    )
+    assert.equal(row.tools.find((tool) => tool.tool === 'nested').calls, 0)
+    assert.doesNotThrow(() => renderHtml(report, { lang: 'zh', base: '/skill-eval' }))
+  })
+})

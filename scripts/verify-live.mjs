@@ -27,7 +27,7 @@ const dashboard = dashboardBase()
 const boardPath = `${dashboard}/board/${version}`
 const configPath = `${boardPath}/config`
 const rows = []
-const add = (id, ok, detail) => rows.push({ id, ok, detail })
+const add = (id, ok, detail, options = {}) => rows.push({ id, ok, detail, manual: options.manual === true })
 
 const get = (pathname, expectType) => httpGet(base, pathname, { expectType })
 
@@ -107,7 +107,7 @@ try {
   }
   add(
     'turn-boards',
-    true,
+    turns.length > 0,
     turns.length > 0
       ? `${turns.length} board(s), newest ${turns.sort().at(-1)}`
       : 'none yet — load a skill, finish the turn, then re-run',
@@ -154,15 +154,25 @@ add(
   'manual:native-seats',
   true,
   'open the sidebar Skill eval panel icon (board) and Settings → Plugins → dsh-skill-eval (bundle config)',
+  { manual: true },
 )
-add('manual:turn-strip', true, 'load a skill in a turn; its result strip shows score, next fix and edit history')
+add('manual:turn-strip', true, 'load a skill in a turn; its result strip shows score, next fix and edit history', {
+  manual: true,
+})
 
-const failed = rows.filter((row) => !row.ok)
+const failed = rows.filter((row) => !row.ok && !row.manual)
 console.log(`dsh-skill-eval verify — ${base} (version ${version})`)
-for (const row of rows) console.log(`  [${row.ok ? 'PASS' : 'FAIL'}] ${row.id.padEnd(18)} ${row.detail}`)
+for (const row of rows) {
+  const state = row.manual ? 'INFO' : row.ok ? 'PASS' : 'FAIL'
+  console.log(`  [${state}] ${row.id.padEnd(18)} ${row.detail}`)
+}
 console.log('')
 if (failed.length > 0) {
   console.log(`FAIL (${failed.length}) — restart DeepSeek Harness if versioned-json reports text/html.`)
   process.exit(1)
 }
-console.log('PASS — the running host serves this generation and the product surfaces are reachable.')
+const checks = rows.filter((row) => !row.manual).length
+const manual = rows.filter((row) => row.manual).length
+console.log(
+  `PASS — the running host serves this generation and the product surfaces are reachable (${checks} check(s), ${manual} manual).`,
+)

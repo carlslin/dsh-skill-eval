@@ -29,9 +29,26 @@ function TurnSkillCardBody(props) {
   const { lang, t } = useLang()
   const state = useStore()
 
+  const retryRef = useRef({ key: '', count: 0 })
   useEffect(() => {
     ensureReport()
   }, [sessionId, turn && turn.turn])
+  // ensureReport() has a 10 s warm-cache window; a turn that settles inside it
+  // has no turnLoads row yet and would render nothing forever. Retry twice.
+  useEffect(() => {
+    const turnNumber =
+      typeof turn?.turn === 'number' ? turn.turn : typeof turn?.number === 'number' ? turn.number : null
+    if (turnNumber === null) return undefined
+    const data = state.data
+    if (!data || !Array.isArray(data.turnLoads)) return undefined
+    if (data.turnLoads.some((row) => row.sessionId === sessionId && row.turn === turnNumber)) return undefined
+    const key = sessionId + ':' + turnNumber
+    if (retryRef.current.key !== key) retryRef.current = { key, count: 0 }
+    if (retryRef.current.count >= 2) return undefined
+    retryRef.current.count += 1
+    const timer = setTimeout(() => load(), 1200)
+    return () => clearTimeout(timer)
+  }, [sessionId, turn, state.data, state.fetchedAt])
 
   if (!turn) return null
   // `status` is 'closed' on current hosts; older/other builds may omit it or
@@ -58,12 +75,9 @@ function TurnSkillCardBody(props) {
       (node) => node && node.location && node.location.turn && node.location.turn.turn === turnNumber,
     )
     toolCalls = inTurn.filter((node) => node.kind === 'tool-call').length
-    errors = inTurn.filter(
-      (node) =>
-        node.kind === 'tool-call' &&
-        node.data &&
-        (node.data.isError === true || (node.data.result && node.data.result.isError === true)),
-    ).length
+    // DSH's tool-call node payload is ToolChatData { root: ToolCallBlock }; the
+    // error flag lives on the settled root block, not on data.isError.
+    errors = inTurn.filter((node) => node?.kind === 'tool-call' && node.data?.root?.isError === true).length
   }
 
   const skills = [...new Set(rows.flatMap((row) => row.skills))]
@@ -148,7 +162,7 @@ function TurnSkillCardBody(props) {
                       { key: (edit.at || '') + '-' + index },
                       (edit.verdict === 'accept' ? '✅ ' : edit.verdict === 'reject' ? '🚫 ' : '⚠️ ') +
                         (edit.dimension || 'static') +
-                        (edit.hypothesis ? ' · ' + edit.hypothesis.slice(0, 60) : ''),
+                        (edit.hypothesis ? ' · ' + String(edit.hypothesis).slice(0, 60) : ''),
                     ),
                   ),
                 )

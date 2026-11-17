@@ -36,7 +36,7 @@ import {
   normalizeSettings,
   parseFormSettings,
   renderConfigHtml,
-  saveSettings,
+  updateSettings,
   SETTINGS_FIELDS,
   SETTINGS_FILE,
 } from './lib/settings.js'
@@ -276,11 +276,11 @@ function log(ctx, level, message) {
 const VIEWS = ['summary', 'mcp', 'runs', 'standard', 'loop', 'validity', 'history', 'impact', 'dev', 'turns']
 
 /** Read the files the acceptance check needs, best effort. */
-async function acceptanceFiles(store, readFile) {
+async function acceptanceFiles(store, readFile, snapshotDir = path.join(store.dir, 'reports')) {
   const dir = store.dir
   const eventsPath = path.join(dir, 'events.jsonl')
-  const snapshotMarkdownPath = path.join(dir, 'reports', 'latest.md')
-  const snapshotJsonPath = path.join(dir, 'reports', 'latest.json')
+  const snapshotMarkdownPath = path.join(snapshotDir, 'latest.md')
+  const snapshotJsonPath = path.join(snapshotDir, 'latest.json')
   let events = []
   try {
     const raw = await readFile(eventsPath, 'utf8')
@@ -362,7 +362,7 @@ async function runReport(analyzer, args, config) {
       config: config,
       routes: DIAGNOSTICS.routes,
       records,
-      store: { dir: analyzer.store.dir, failed: analyzer.store.failed, queue: analyzer.store.queue },
+      store: { dir: analyzer.store.dir, failed: analyzer.store.failed, queued: analyzer.store.pending },
       tools: DIAGNOSTICS.tools,
       inspectProvider: DIAGNOSTICS.inspectProvider ? 'skill-eval' : null,
       warnings: DIAGNOSTICS.warnings,
@@ -489,6 +489,16 @@ export function apply(ctx, config) {
   }
 
   const analyzer = createAnalyzer(ctx, cfg)
+  ctx.effect(
+    () => () => {
+      try {
+        analyzer.dispose()
+      } catch {
+        // best effort on shutdown
+      }
+    },
+    'skill-eval: analyzer',
+  )
   analyzer.store.onError = (message) => {
     DIAGNOSTICS.warnings.push(`store write failed: ${message}`)
     log(ctx, 'warn', `skill-eval store write failed: ${message}`)
@@ -513,27 +523,38 @@ export function apply(ctx, config) {
   // A settled turn writes the aggregated report to disk. This is the "result
   // after every run" surface: it costs zero tokens because it never touches the
   // model context.
-  const snapshots =
-    cfg.reportOnTurnEnd === false
-      ? null
-      : createSnapshots({
-          analyzer,
-          dir: cfg.reportDir ? String(cfg.reportDir) : path.join(analyzer.store.dir, 'reports'),
-          log: (message) => log(ctx, 'warn', message),
-          turnReports: cfg.turnReports !== false,
-          turnReportsKeep: cfg.turnReportsKeep ?? 50,
-        })
+  // Always create the snapshotter and read the switches live: reportOnTurnEnd
+  // only controls latest.md/json, turnReports controls the per-turn boards, and
+  // a settings save must not need a restart (the UI promises immediate apply).
+  const snapshots = createSnapshots({
+    analyzer,
+    dir: cfg.reportDir ? String(cfg.reportDir) : path.join(analyzer.store.dir, 'reports'),
+    log: (message) => log(ctx, 'warn', message),
+    enabled: () => cfg.reportOnTurnEnd !== false,
+    turnReports: () => cfg.turnReports !== false,
+    turnReportsKeep: cfg.turnReportsKeep ?? 50,
+  })
 
   if (snapshots) {
-    ctx.on('agent/turn-stopping', () => {
+    const offTurnStopping = ctx.on('agent/turn-stopping', (payload) => {
       try {
-        snapshots.request()
+        // Label the board with the turn that actually settled. Without this a
+        // concurrent subagent turn (or a new load inside the debounce) would
+        // make the writer pick whatever turnLoads is globally newest.
+        const sessionId = payload?.agent ? String(payload.agent.id) : null
+        const turn = typeof payload?.turn === 'number' ? payload.turn : null
+        snapshots.request(sessionId ? { sessionId, turn } : null)
       } catch {
         // intentionally ignored: snapshot request is best effort on turn stop
       }
     })
     ctx.effect(
       () => () => {
+        try {
+          if (typeof offTurnStopping === 'function') offTurnStopping()
+        } catch {
+          // best effort
+        }
         void snapshots.dispose()
       },
       'skill-eval: snapshots',
@@ -639,8 +660,10 @@ export function apply(ctx, config) {
               const keyword = target.toLowerCase()
               if (keyword === 'accept' || keyword === 'doctor') {
                 const report = await analyzer.build()
-                const files = await acceptanceFiles(analyzer.store, (file) =>
-                  import('node:fs/promises').then((fs) => fs.readFile(file, 'utf8')),
+                const files = await acceptanceFiles(
+                  analyzer.store,
+                  (file) => import('node:fs/promises').then((fs) => fs.readFile(file, 'utf8')),
+                  cfg.reportDir ? String(cfg.reportDir) : path.join(analyzer.store.dir, 'reports'),
                 )
                 const acceptance = checkInProcessReport(report, { version: PLUGIN_VERSION ?? 'unknown', files })
                 return { kind: 'success', text: '\n' + renderAcceptance(acceptance) + '\n' }
@@ -712,6 +735,38 @@ export function apply(ctx, config) {
     const clientBase = '/skill-eval'
     const dataPath = `${clientBase}/data`
 
+    // Writes are same-origin fenced. Comparing Origin to Host alone does not
+    // stop DNS rebinding (both are the attacker's domain after rebinding), so
+    // the Host itself must be the server's own origin or a loopback name.
+    let serverOrigin = null
+    const hostnameOf = (value) => {
+      try {
+        return new URL(String(value).includes('://') ? String(value) : 'http://' + String(value)).hostname.toLowerCase()
+      } catch {
+        return ''
+      }
+    }
+    const allowedWriteHosts = () => {
+      const hosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+      const own = serverOrigin ? hostnameOf(serverOrigin) : ''
+      if (own) hosts.add(own)
+      return hosts
+    }
+    const rememberOrigin = (webServer) => {
+      try {
+        const value = webServer.getOrigin()
+        if (typeof value === 'string' && value) serverOrigin = value
+      } catch {
+        // keep the loopback fallback
+      }
+    }
+    ctx.inject(['webServer'], (c) => {
+      c.effect(() => {
+        rememberOrigin(c.webServer)
+        return () => {}
+      }, 'skill-eval: origin')
+    })
+
     // The board's dev tab shows what the agent's `view:"dev"` report shows in
     // short form: which generation is loaded, whether the package on disk moved
     // ahead of it (the ESM-cache restart trap), how many routes this generation
@@ -736,7 +791,12 @@ export function apply(ctx, config) {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'no-store',
       })
-      res.end(JSON.stringify({ ...report, dev: diagnosticsPayload() }, null, 2))
+      // The pages may live under a custom dashboardPath; ship their exact
+      // paths so the client never hardcodes a route the host did not register.
+      const pages = PLUGIN_VERSION
+        ? { board: `${base}/board/${PLUGIN_VERSION}`, config: `${base}/board/${PLUGIN_VERSION}/config` }
+        : { board: base, config: `${base}/config` }
+      res.end(JSON.stringify({ ...report, dev: diagnosticsPayload(), pages }, null, 2))
     }
 
     const bodyTooLarge = () => Object.assign(new Error('request body too large'), { statusCode: 413 })
@@ -781,11 +841,13 @@ export function apply(ctx, config) {
     const trustedWrite = (req, { requireHeader = false } = {}) => {
       const site = String(req.headers?.['sec-fetch-site'] ?? '').toLowerCase()
       if (site === 'cross-site') return false
+      const host = String(req.headers?.['host'] ?? '')
+      if (!allowedWriteHosts().has(hostnameOf(host))) return false
       const origin = req.headers?.origin
       if (origin) {
         try {
           const parsed = new URL(origin)
-          if (!req.headers.host || parsed.host !== req.headers.host) return false
+          if (parsed.host !== host) return false
         } catch {
           return false
         }
@@ -827,7 +889,7 @@ export function apply(ctx, config) {
             send(400, renderConfigHtml({ config: cfg, base: pageBase, errors, lang }))
             return
           }
-          if (settingsDir) await saveSettings(settingsDir, { ...loadSettingsSync(settingsDir), ...values })
+          if (settingsDir) await updateSettings(settingsDir, values)
           applySettings(cfg, values)
           analyzer.invalidate()
           DIAGNOSTICS.settings = loadSettingsSync(settingsDir)
@@ -908,7 +970,7 @@ export function apply(ctx, config) {
             send(400, { saved: false, errors, values: settingsPayload().values })
             return
           }
-          if (settingsDir) await saveSettings(settingsDir, { ...loadSettingsSync(settingsDir), ...values })
+          if (settingsDir) await updateSettings(settingsDir, values)
           applySettings(cfg, values)
           analyzer.invalidate()
           DIAGNOSTICS.settings = loadSettingsSync(settingsDir)
@@ -1093,19 +1155,19 @@ export function apply(ctx, config) {
 
   const SETTINGS_KEYS = SETTINGS_FIELDS.map((field) => field.key)
 
-  if (cfg.promptHint !== false)
-    ctx.inject(['systemPrompt'], (c) => {
-      c.effect(() => {
-        const stop = c.systemPrompt.section({
-          name: 'skill-eval:usage',
-          order: 118,
-          text: () =>
-            'Skill telemetry is recorded for every `skill` load. When asked how a skill performed or how to improve it, call `skill_eval_report` (pass {"skill":"<name>"} for one skill) and act on the cited fixes instead of guessing. Before editing a skill named in the report, screen the change with `skill_eval_review` (leakage critic) and record the hypothesis; ask `skill_eval_report` with view:"loop" for the next step and view:"validity" for what the evidence can and cannot support.',
-        })
-        return () => safe(stop)
-      }, 'skill-eval: prompt section')
-    })
+  ctx.inject(['systemPrompt'], (c) => {
+    c.effect(() => {
+      const stop = c.systemPrompt.section({
+        name: 'skill-eval:usage',
+        order: 118,
+        text: () =>
+          cfg.promptHint === false
+            ? ''
+            : 'Skill telemetry is recorded for every `skill` load. When asked how a skill performed or how to improve it, call `skill_eval_report` (pass {"skill":"<name>"} for one skill) and act on the cited fixes instead of guessing. Before editing a skill named in the report, screen the change with `skill_eval_review` (leakage critic) and record the hypothesis; ask `skill_eval_report` with view:"loop" for the next step and view:"validity" for what the evidence can and cannot support.',
+      })
+      return () => safe(stop)
+    }, 'skill-eval: prompt section')
+  })
 
   log(ctx, 'info', `skill-eval: recording enabled, data dir ${analyzer.store.dir}`)
 }
-

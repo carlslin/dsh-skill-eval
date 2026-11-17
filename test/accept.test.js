@@ -226,10 +226,12 @@ test('the versioned payload proves the current generation through token fields',
   const old = { ...MODERN, skills: [{ skill: 'a', score: { total: 80 }, stats: {} }] }
   const good = checkVersionedPayload(current, current)
   assert.equal(good.find((item) => item.id === 'token-accounting').ok, true)
+  assert.equal(good.find((item) => item.id === 'canonical-route').ok, true)
   assert.match(good.find((item) => item.id === 'canonical-route').detail, /agree/)
 
   const stale = checkVersionedPayload(old, { ...old, extra: true })
   assert.equal(stale.find((item) => item.id === 'token-accounting').ok, false)
+  assert.equal(stale.find((item) => item.id === 'canonical-route').ok, false)
   assert.match(stale.find((item) => item.id === 'canonical-route').detail, /older handler/)
 })
 

@@ -64,7 +64,7 @@
 | 想看整体汇报       | 侧边栏面板图标「技能评测」→ 主面板（或浏览器打开 `/skill-eval/board/<版本>`） | 技能/运行/MCP/开发者标签，含下一步与效度           |
 | 想改评分标准       | 设置 → 插件 → `dsh-skill-eval` 包页面 → 配置                                  | 权重/阈值/预算/开关，保存即生效                    |
 | 入口速查           | [ENTRYPOINTS.md](ENTRYPOINTS.md)                                              | 三个日常入口 + 网页/命令/终端                      |
-| 发版前自检         | `dsh-skill-eval-doctor` + `accept` + `verify`                                 | 19 / 17 / 9 项：打包、代次、产品面                 |
+| 发版前自检         | `dsh-skill-eval-doctor` + `accept` + `verify`                                 | 19 / 17 / 7+2 项：打包、代次、产品面               |
 
 ## 判定规则（避免自欺）
 

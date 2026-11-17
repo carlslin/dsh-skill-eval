@@ -2,7 +2,7 @@
 // Keep in sync with package.json `version` (a test enforces it). The host
 // registers this exact path per release, so a plugin that was hot-reloaded
 // without reclaiming the canonical route still answers here.
-const DATA_VERSION = '1.20.2'
+const DATA_VERSION = '1.20.3'
 const DATA_URL = '/skill-eval/data/' + DATA_VERSION
 const DATA_URL_FALLBACK = '/skill-eval/data'
 const SETTINGS_URL = '/skill-eval/settings/' + DATA_VERSION
@@ -18,8 +18,13 @@ function pct(value) {
 
 function scoreColor(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'var(--dsw-alias-state-idle-primary, #a1a1aa)'
-  if (value >= 90) return 'var(--dsw-alias-state-success-primary, #2f9e44)'
-  if (value >= 70) return 'var(--dsw-alias-state-warn-primary, #d97706)'
+  // Colour bands follow the configured grade floors, so a 92-point skill can
+  // never render green while its letter says B.
+  const thresholds = (store.get().data && store.get().data.scoring && store.get().data.scoring.thresholds) || {}
+  const excellent = Number(thresholds.excellent) || 90
+  const pass = Number(thresholds.pass) || 70
+  if (value >= excellent) return 'var(--dsw-alias-state-success-primary, #2f9e44)'
+  if (value >= pass) return 'var(--dsw-alias-state-warn-primary, #d97706)'
   return 'var(--dsw-alias-state-error-primary, #c92a2a)'
 }
 
@@ -34,6 +39,16 @@ async function fetchReport(url) {
   if (!response.ok) {
     const error = new Error('HTTP ' + response.status)
     error.status = response.status
+    throw error
+  }
+  const type =
+    (response.headers && typeof response.headers.get === 'function' && response.headers.get('content-type')) || ''
+  if (type.indexOf('json') === -1) {
+    // DSH's prefix route answers 200 HTML for an unclaimed versioned subpath,
+    // so a status-only fallback would never fire during a restart-skew.
+    const error = new Error(url + ' returned ' + (type || 'no content-type') + ' instead of JSON')
+    error.status = response.status
+    error.notJson = true
     throw error
   }
   return response.json()
@@ -57,7 +72,8 @@ function load() {
     .catch((error) => {
       // a host that predates the versioned alias (or a hot reload that kept
       // the canonical route) still answers on the unversioned path
-      if (error && error.status === 404) return fetchReport(DATA_URL_FALLBACK)
+      if (error && (error.status === 404 || error.notJson || error instanceof SyntaxError))
+        return fetchReport(DATA_URL_FALLBACK)
       throw error
     })
     .then((data) => {
@@ -85,11 +101,30 @@ function ensureReport() {
 const BOARD_URL = '/skill-eval/board/' + DATA_VERSION
 const CONFIG_URL = BOARD_URL + '/config'
 
+function pagePath(kind) {
+  try {
+    const pages = store.get().data && store.get().data.pages
+    const value = pages && pages[kind]
+    if (typeof value === 'string' && value) return value
+  } catch {
+    // fall back to the default route
+  }
+  return kind === 'board' ? BOARD_URL : CONFIG_URL
+}
+
 function boardUrl() {
   try {
-    return window.location.origin + BOARD_URL
+    return window.location.origin + pagePath('board')
   } catch {
-    return BOARD_URL
+    return pagePath('board')
+  }
+}
+
+function configUrl() {
+  try {
+    return window.location.origin + pagePath('config')
+  } catch {
+    return pagePath('config')
   }
 }
 

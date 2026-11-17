@@ -48,7 +48,7 @@ The board and settings page are bilingual: `Accept-Language` picks the language,
 ```bash
 dsh-skill-eval-doctor    # 打包预检 19 项（--release 加产物检查）· packaging pre-flight
 dsh-skill-eval-accept    # 代次/数据契约 17 项 · generation & data contract
-dsh-skill-eval-verify    # 产品面可达 9 项 · product surfaces (after a reload)
+dsh-skill-eval-verify    # 产品面可达 7 项 + 2 项手动 · product surfaces (after a reload)
 ```
 
 ## 调试（可选） · Debug (opt-in)

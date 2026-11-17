@@ -127,9 +127,24 @@ function ReportOverlay() {
                         key: view,
                         type: 'button',
                         role: 'tab',
+                        id: 'sev-overlay-tab-' + view,
+                        'aria-controls': 'sev-overlay-view',
                         'aria-selected': state.view === view,
+                        tabIndex: state.view === view ? 0 : -1,
                         className: 'sev-tab' + (state.view === view ? ' sev-tab--on' : ''),
                         onClick: () => setView(view),
+                        onKeyDown: (event) => {
+                          if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                          event.preventDefault()
+                          const views = ['skills', 'steps', 'runs', 'mcp', 'dev']
+                          const index = views.indexOf(view)
+                          const next =
+                            views[(index + (event.key === 'ArrowRight' ? 1 : views.length - 1)) % views.length]
+                          setView(next)
+                          const target =
+                            typeof document !== 'undefined' ? document.getElementById('sev-overlay-tab-' + next) : null
+                          if (target) target.focus()
+                        },
                       },
                       t.tabs[view],
                     ),
@@ -169,7 +184,12 @@ function ReportOverlay() {
             ),
             h(
               'div',
-              { className: 'sev-body' },
+              {
+                className: 'sev-body',
+                role: 'tabpanel',
+                id: 'sev-overlay-view',
+                'aria-labelledby': 'sev-overlay-tab-' + state.view,
+              },
               state.loading && !data ? h('div', { className: 'sev-empty' }, t.loading) : null,
               data && !data.scoring
                 ? h('div', { className: 'sev-stale' }, h('b', null, t.staleTitle), h('span', null, t.staleHint))

@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.20.3 — review hardening
+
+A full independent review (host, client, tests/packaging, plus a second-model
+pass) reproduced the issues below. Every fix has a regression test.
+
+- **The per-turn strip counts real errors.** It read `data.isError`, but DSH's
+  tool-call payload is `ToolChatData { root }`; errors now come from
+  `root.isError`, and the strip retries the report when the 10 s cache predates
+  the turn (rapid consecutive turns used to render nothing).
+- **Settings writes cannot lose a field.** Both HTTP paths now merge inside the
+  serialized write queue (`updateSettings`); two overlapping partial saves keep
+  both keys. `windowTtlMs`, `reportOnTurnEnd`, `turnReports` and `promptHint`
+  are read live, so "saved values apply immediately" is true.
+- **A failed `skill` load opens no evidence window** and no longer supersedes the
+  previous skill's window; the test now asserts after turn-stop/dispose.
+- **Corrupt window records cannot crash reporting.** Nested `mcp` buckets and
+  tool entries are normalised on read (plus defence-in-depth guards in the
+  score/report merge), and finite-but-invalid timestamps render as `—`.
+- **The release checks can fail.** `canonical-route` fails on restart skew,
+  `turn-boards` fails with zero boards, manual rows are INFO and excluded from
+  the PASS count, and `weightsPercent` uses largest-remainder so it always sums
+  to 100 (2/2/2/1 used to show 101 and fail verify-live).
+- **The accept CLI is honest.** It reads `dataDir` from the served report
+  (previous `JSON.parse` of an object was silently swallowed), and flag values
+  no longer become the base URL.
+- **The packaging doctor passes in an installed tarball** (no `client/` sources
+  to compare), requires locale/scripts/README/CHANGELOG/LICENSE in `files`, and
+  `--release` opens the tarball instead of only checking that it exists.
+- **Client degradation works.** Versioned data/settings routes that answer
+  200 HTML (DSH's prefix route) now fall back to the canonical JSON routes
+  instead of showing a parse error; the stale banner is reachable again.
+- **Per-turn boards carry the settled turn** (session+turn passed from
+  `agent/turn-stopping`), coalesced writes emit one board per turn, snapshots
+  are written atomically, and history/impact use the shared timestamp guard.
+- **Security/hygiene:** the settings fence also rejects rebinding Hosts (not
+  only a mismatched Origin), 403/413 paths and DNS rebinding have tests,
+  analyzer/listener disposers are released on teardown, the scheduler guards
+  against writes after dispose, duplicate `/skill-name` invocations collapse on
+  the durable read path, the dev tab renders the settings file/warning count,
+  the settings form keeps in-flight edits and labels its controls, and the
+  score colours follow the configured grade floors.
+- Tests: **258 passing** (`npm test`, jsdom installed).
+
 ## 1.20.2 — MCP board and settings readability
 
 - **MCP tab rebuilt.** The old tab was one SVG chart with two thin bars plus a

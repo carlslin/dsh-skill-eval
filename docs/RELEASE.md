@@ -2,7 +2,7 @@
 
 ## 1. 代码与文案
 
-- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**241 tests**）
+- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**258 tests**）
 - [ ] `npm run build:pack` 产出 tarball 并通过 `doctor --release`
 - [ ] `package.json` version 与 `client.js` 的 `DATA_VERSION` 一致（doctor 检查）
 - [ ] CHANGELOG 有本次版本条目
@@ -11,7 +11,7 @@
 ## 2. 真实宿主验证
 
 - [ ] `dsh-skill-eval-accept` PASS（17 项，含看板、配置页、回合快照、设置读写）
-- [ ] `dsh-skill-eval-verify` PASS（9 项，确认宿主真的服务这一代代码）
+- [ ] `dsh-skill-eval-verify` PASS（7 项 + 2 项手动，确认宿主真的服务这一代代码）
 - [ ] 打开侧边栏「技能评测」面板：五个标签（技能/轨迹/运行/MCP/开发者）、刷新、复制
 - [ ] 设置 → 插件 → `dsh-skill-eval` → 配置：改一个值 → 保存 → 看到「已保存并立即生效」
 - [ ] 在同一轮加载多个 skill：回合条显示每个 skill 的 chip 与各自 next fix

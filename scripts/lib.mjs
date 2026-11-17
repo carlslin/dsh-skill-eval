@@ -14,6 +14,41 @@ export async function readBridge() {
   }
 }
 
+/**
+ * Parse CLI arguments for the terminal checks: flags that take a value must
+ * consume their value instead of leaking it into the positional base URL.
+ * Returns { baseArg, values } where values is keyed by the flag name.
+ */
+export function parseCliArgs(argv, flagsWithValues = ['--data-dir']) {
+  const args = Array.isArray(argv) ? argv : []
+  let baseArg = null
+  const values = {}
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = String(args[i])
+    if (arg === '--') {
+      const next = args[i + 1]
+      if (next !== undefined && baseArg === null) baseArg = String(next)
+      break
+    }
+    if (arg.startsWith('--') && arg.includes('=')) {
+      const name = arg.slice(0, arg.indexOf('='))
+      if (flagsWithValues.includes(name)) values[name] = arg.slice(name.length + 1)
+      continue
+    }
+    if (flagsWithValues.includes(arg)) {
+      const value = args[i + 1]
+      if (value !== undefined) {
+        values[arg] = String(value)
+        i += 1
+      }
+      continue
+    }
+    if (arg.startsWith('--')) continue
+    if (baseArg === null) baseArg = arg
+  }
+  return { baseArg, values }
+}
+
 /** Base URL precedence: explicit argument > DSH_WEB_URL > relay bridge. */
 export async function resolveBaseUrl(explicit) {
   return pickBaseUrl(explicit, process.env.DSH_WEB_URL, await readBridge())

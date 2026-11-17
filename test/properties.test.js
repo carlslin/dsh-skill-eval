@@ -156,7 +156,7 @@ test('property: the ranking caveat appears exactly when adjacent intervals overl
   assert.equal(rankingOf([entry('a', 90, 85, 95), entry('b', 88, 84, 92)]).significant, false)
   assert.equal(rankingOf([entry('a', 90, 85, 95), entry('b', 70, 60, 80)]).significant, true)
   assert.equal(rankingOf([entry('a', 90, 85, 95), entry('b', 88, 10, 20)]).significant, true)
-  assert.equal(rankingOf([entry('a', 90, 85, 95)]).significant, true)
+  assert.equal(rankingOf([entry('a', 90, 85, 95)]).significant, null)
 })
 
 test('property: MCP advice appears exactly past the configured error-rate threshold', () => {

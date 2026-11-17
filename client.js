@@ -58,7 +58,14 @@ window.__ModuleLoader__.load({
         corr: '纠正率',
         err: '错误率',
         latency: '加载耗时',
-        dims: { static: '静态质量', reliability: '可靠性', effectiveness: '有效性', efficiency: '效率' },
+        dims: {
+          static: '静态质量',
+          reliability: '可靠性',
+          effectiveness: '有效性',
+          efficiency: '效率',
+          lifecycle: '生命周期',
+          mcp: 'MCP',
+        },
         provisional: '样本不足，分数为临时值',
         noAdvice: '没有需要修的问题',
         footerHint: '也可以直接让 agent 调 skill_eval_report',
@@ -157,6 +164,10 @@ window.__ModuleLoader__.load({
           skew: '需要重启',
           totals: '记录量',
           store: '存储错误',
+          settingsFile: '配置文件',
+          warnings: '告警',
+          inspect: 'Inspect 提供者',
+          ok: '正常',
         },
       },
       en: {
@@ -177,7 +188,14 @@ window.__ModuleLoader__.load({
         corr: 'corr',
         err: 'err',
         latency: 'load',
-        dims: { static: 'static', reliability: 'reliability', effectiveness: 'effectiveness', efficiency: 'efficiency' },
+        dims: {
+          static: 'static',
+          reliability: 'reliability',
+          effectiveness: 'effectiveness',
+          efficiency: 'efficiency',
+          lifecycle: 'lifecycle',
+          mcp: 'mcp',
+        },
         provisional: 'provisional score: not enough loads yet',
         noAdvice: 'nothing to fix from recorded evidence',
         footerHint: 'The agent can read the same report through skill_eval_report',
@@ -277,6 +295,10 @@ window.__ModuleLoader__.load({
           skew: 'restart',
           totals: 'records',
           store: 'store error',
+          settingsFile: 'settings file',
+          warnings: 'warnings',
+          inspect: 'inspect provider',
+          ok: 'ok',
         },
       },
     }
@@ -301,7 +323,7 @@ window.__ModuleLoader__.load({
     // Keep in sync with package.json `version` (a test enforces it). The host
     // registers this exact path per release, so a plugin that was hot-reloaded
     // without reclaiming the canonical route still answers here.
-    const DATA_VERSION = '1.20.2'
+    const DATA_VERSION = '1.20.3'
     const DATA_URL = '/skill-eval/data/' + DATA_VERSION
     const DATA_URL_FALLBACK = '/skill-eval/data'
     const SETTINGS_URL = '/skill-eval/settings/' + DATA_VERSION
@@ -317,8 +339,13 @@ window.__ModuleLoader__.load({
 
     function scoreColor(value) {
       if (typeof value !== 'number' || !Number.isFinite(value)) return 'var(--dsw-alias-state-idle-primary, #a1a1aa)'
-      if (value >= 90) return 'var(--dsw-alias-state-success-primary, #2f9e44)'
-      if (value >= 70) return 'var(--dsw-alias-state-warn-primary, #d97706)'
+      // Colour bands follow the configured grade floors, so a 92-point skill can
+      // never render green while its letter says B.
+      const thresholds = (store.get().data && store.get().data.scoring && store.get().data.scoring.thresholds) || {}
+      const excellent = Number(thresholds.excellent) || 90
+      const pass = Number(thresholds.pass) || 70
+      if (value >= excellent) return 'var(--dsw-alias-state-success-primary, #2f9e44)'
+      if (value >= pass) return 'var(--dsw-alias-state-warn-primary, #d97706)'
       return 'var(--dsw-alias-state-error-primary, #c92a2a)'
     }
 
@@ -333,6 +360,16 @@ window.__ModuleLoader__.load({
       if (!response.ok) {
         const error = new Error('HTTP ' + response.status)
         error.status = response.status
+        throw error
+      }
+      const type =
+        (response.headers && typeof response.headers.get === 'function' && response.headers.get('content-type')) || ''
+      if (type.indexOf('json') === -1) {
+        // DSH's prefix route answers 200 HTML for an unclaimed versioned subpath,
+        // so a status-only fallback would never fire during a restart-skew.
+        const error = new Error(url + ' returned ' + (type || 'no content-type') + ' instead of JSON')
+        error.status = response.status
+        error.notJson = true
         throw error
       }
       return response.json()
@@ -356,7 +393,8 @@ window.__ModuleLoader__.load({
         .catch((error) => {
           // a host that predates the versioned alias (or a hot reload that kept
           // the canonical route) still answers on the unversioned path
-          if (error && error.status === 404) return fetchReport(DATA_URL_FALLBACK)
+          if (error && (error.status === 404 || error.notJson || error instanceof SyntaxError))
+            return fetchReport(DATA_URL_FALLBACK)
           throw error
         })
         .then((data) => {
@@ -384,11 +422,30 @@ window.__ModuleLoader__.load({
     const BOARD_URL = '/skill-eval/board/' + DATA_VERSION
     const CONFIG_URL = BOARD_URL + '/config'
 
+    function pagePath(kind) {
+      try {
+        const pages = store.get().data && store.get().data.pages
+        const value = pages && pages[kind]
+        if (typeof value === 'string' && value) return value
+      } catch {
+        // fall back to the default route
+      }
+      return kind === 'board' ? BOARD_URL : CONFIG_URL
+    }
+
     function boardUrl() {
       try {
-        return window.location.origin + BOARD_URL
+        return window.location.origin + pagePath('board')
       } catch {
-        return BOARD_URL
+        return pagePath('board')
+      }
+    }
+
+    function configUrl() {
+      try {
+        return window.location.origin + pagePath('config')
+      } catch {
+        return pagePath('config')
       }
     }
 
@@ -484,26 +541,53 @@ window.__ModuleLoader__.load({
     const settingsStore = createStore({ loading: false, saving: false, data: null, error: null, savedAt: 0 })
     const useSettings = () => useSyncExternalStore(settingsStore.subscribe, settingsStore.get, settingsStore.get)
 
-    async function fetchSettings() {
-      settingsStore.set((state) => ({ ...state, loading: true, error: null }))
-      let response = await fetch(SETTINGS_URL, { headers: { accept: 'application/json' } })
-      if (response.status === 404)
-        response = await fetch(SETTINGS_URL_FALLBACK, { headers: { accept: 'application/json' } })
-      if (!response.ok) throw new Error('HTTP ' + response.status)
+    // One generation counter for reads and writes: a slow GET must not overwrite
+    // the values a newer save just persisted.
+    let settingsGeneration = 0
+
+    async function fetchSettingsPayload(url) {
+      const response = await fetch(url, { headers: { accept: 'application/json' } })
       const type =
         (response.headers && typeof response.headers.get === 'function' && response.headers.get('content-type')) || ''
-      if (type.indexOf('json') === -1) {
-        // The dashboard's stale prefix route answers HTML when this host still
-        // runs a generation from before the settings API existed.
-        throw new Error('host-too-old')
+      if (!response.ok || type.indexOf('json') === -1) {
+        // DSH's stale prefix route answers 200 HTML for an unclaimed subpath, so
+        // treat "not JSON" the same as 404 and try the canonical route.
+        const error = new Error(!response.ok ? 'HTTP ' + response.status : 'host-too-old')
+        error.status = response.status
+        error.notJson = type.indexOf('json') === -1
+        throw error
       }
-      const data = await response.json()
-      settingsStore.set((state) => ({ ...state, loading: false, data }))
+      return response.json()
+    }
+
+    async function fetchSettings() {
+      const generation = (settingsGeneration += 1)
+      const update = (patch) => {
+        if (generation === settingsGeneration) settingsStore.set((state) => ({ ...state, ...patch }))
+      }
+      update({ loading: true, error: null })
+      let data
+      try {
+        data = await fetchSettingsPayload(SETTINGS_URL)
+      } catch (error) {
+        const retry = error && (error.status === 404 || error.notJson)
+        if (!retry) throw error
+        try {
+          data = await fetchSettingsPayload(SETTINGS_URL_FALLBACK)
+        } catch (fallbackError) {
+          if (fallbackError && (fallbackError.status === 404 || fallbackError.notJson))
+            throw new Error('host-too-old', { cause: fallbackError })
+          throw fallbackError
+        }
+      }
+      update({ loading: false, data })
       return data
     }
 
     async function saveSettings(values) {
-      settingsStore.set((state) => ({ ...state, saving: true, error: null }))
+      // Invalidate any in-flight GET; its snapshot predates this save.
+      settingsGeneration += 1
+      settingsStore.set((state) => ({ ...state, saving: true, error: null, savedAt: 0 }))
       try {
         const post = (url) =>
           fetch(url, {
@@ -518,6 +602,7 @@ window.__ModuleLoader__.load({
           settingsStore.set((state) => ({
             ...state,
             saving: false,
+            savedAt: 0,
             error: payload.errors?.[0]?.message ?? 'HTTP ' + response.status,
           }))
           return false
@@ -533,6 +618,7 @@ window.__ModuleLoader__.load({
         settingsStore.set((state) => ({
           ...state,
           saving: false,
+          savedAt: 0,
           error: error instanceof Error ? error.message : String(error),
         }))
         return false
@@ -548,6 +634,8 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = useState(null)
       useEffect(() => {
         let alive = true
+        // A success banner from a previous mount must not reappear on reopen.
+        settingsStore.set((current) => (current.savedAt ? { ...current, savedAt: 0 } : current))
         fetchSettings().catch((error) => {
           if (alive) settingsStore.set((current) => ({ ...current, loading: false, error: error.message }))
         })
@@ -560,8 +648,10 @@ window.__ModuleLoader__.load({
       const groups = data && data.fields ? groupSettingsFields(data.fields, lang) : []
       const set = (key, value) => setDraft({ ...values, [key]: value })
       const save = async () => {
-        const ok = await saveSettings(values)
-        if (ok) setDraft(null)
+        const submitted = values
+        const ok = await saveSettings(submitted)
+        // Keep edits typed while the POST was in flight instead of discarding them.
+        if (ok) setDraft((current) => (current === null || current === submitted ? null : current))
       }
       if (state.loading && !data) return h('div', { className: 'sev-settings' }, t.settingsLoading)
       if (state.error && !data) {
@@ -576,7 +666,7 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   className: 'sev-btn',
-                  onClick: () => window.open(window.location.origin + CONFIG_URL, '_blank', 'noopener'),
+                  onClick: () => window.open(configUrl(), '_blank', 'noopener'),
                 },
                 t.settingsOpenWeb,
               )
@@ -623,6 +713,8 @@ window.__ModuleLoader__.load({
                       h('input', {
                         type: 'checkbox',
                         checked: values[field.key] === true,
+                        disabled: state.saving,
+                        'aria-label': lang === 'zh' ? field.labelZh || field.label : field.label,
                         onChange: (event) => set(field.key, event.currentTarget.checked),
                       }),
                       h('i', { 'aria-hidden': 'true' }),
@@ -636,6 +728,8 @@ window.__ModuleLoader__.load({
                         max: field.max,
                         step: field.step,
                         value: values[field.key] ?? '',
+                        disabled: state.saving,
+                        'aria-label': lang === 'zh' ? field.labelZh || field.label : field.label,
                         onChange: (event) => set(field.key, event.currentTarget.value),
                       }),
                       field.unit ? h('em', null, unitLabel(field.unit, lang)) : null,
@@ -658,7 +752,7 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   className: 'sev-btn sev-btn--ghost',
-                  onClick: () => window.open(window.location.origin + CONFIG_URL, '_blank', 'noopener'),
+                  onClick: () => window.open(configUrl(), '_blank', 'noopener'),
                 },
                 t.settingsOpenWeb,
               )
@@ -1402,11 +1496,15 @@ window.__ModuleLoader__.load({
       // denied there), so the dialog is the entry point that always works.
       useEffect(() => {
         if (!configOpen) return undefined
+        const opener = typeof document !== 'undefined' ? document.activeElement : null
         const onKey = (event) => {
           if (event.key === 'Escape') setConfigOpen(false)
         }
         window.addEventListener('keydown', onKey)
-        return () => window.removeEventListener('keydown', onKey)
+        return () => {
+          window.removeEventListener('keydown', onKey)
+          if (opener && typeof opener.focus === 'function') opener.focus()
+        }
       }, [configOpen])
       const data = state.data
       const skills = (data && data.skills) || []
@@ -1427,9 +1525,7 @@ window.__ModuleLoader__.load({
       const trapFocus = (event) => {
         if (event.key !== 'Tab') return
         const focusable = [
-          ...event.currentTarget.querySelectorAll(
-            'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
-          ),
+          ...event.currentTarget.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'),
         ].filter((node) => !node.disabled && node.offsetParent !== null)
         if (focusable.length === 0) return
         const first = focusable[0]
@@ -1452,7 +1548,11 @@ window.__ModuleLoader__.load({
       const needle = query.trim().toLowerCase()
       const visibleSkills = skills.filter(
         (entry) =>
-          (!onlyActionable || hasFix(entry)) && (needle.length === 0 || entry.skill.toLowerCase().includes(needle)),
+          (!onlyActionable || hasFix(entry)) &&
+          (needle.length === 0 ||
+            String(entry.skill ?? '')
+              .toLowerCase()
+              .includes(needle)),
       )
       const updated =
         data && data.generatedAt && Number.isFinite(Date.parse(data.generatedAt))
@@ -1493,9 +1593,23 @@ window.__ModuleLoader__.load({
                     key: view,
                     type: 'button',
                     role: 'tab',
+                    id: 'sev-board-tab-' + view,
+                    'aria-controls': 'sev-board-view',
                     'aria-selected': state.view === view,
+                    tabIndex: state.view === view ? 0 : -1,
                     className: 'sev-tab' + (state.view === view ? ' sev-tab--on' : ''),
                     onClick: () => setView(view),
+                    onKeyDown: (event) => {
+                      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                      event.preventDefault()
+                      const views = ['skills', 'steps', 'runs', 'mcp', 'dev']
+                      const index = views.indexOf(view)
+                      const next = views[(index + (event.key === 'ArrowRight' ? 1 : views.length - 1)) % views.length]
+                      setView(next)
+                      const target =
+                        typeof document !== 'undefined' ? document.getElementById('sev-board-tab-' + next) : null
+                      if (target) target.focus()
+                    },
                   },
                   t.tabs[view],
                 ),
@@ -1573,32 +1687,36 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
-        state.view === 'skills'
-          ? !state.loading && !state.error && skills.length === 0
-            ? h('div', { className: 'sev-empty' }, t.empty)
-            : visibleSkills.length === 0
-              ? h('div', { className: 'sev-empty' }, t.noMatch)
-              : visibleSkills.map((skill) =>
-                  h(SkillCard, {
-                    key: skill.skill,
-                    skill,
-                    t,
-                    lang,
-                    onTrace: (name) => store.set((current) => ({ ...current, view: 'steps', stepFilter: name })),
-                  }),
-                )
-          : state.view === 'steps'
-            ? h(StepsView, {
-                data,
-                t,
-                filter: state.stepFilter || '',
-                onFilter: (name) => store.set((current) => ({ ...current, stepFilter: name })),
-              })
-            : state.view === 'runs'
-              ? h(RunsView, { data, t })
-              : state.view === 'mcp'
-                ? h(McpView, { data, t, lang })
-                : h(DevView, { data, t }),
+        h(
+          'div',
+          { role: 'tabpanel', id: 'sev-board-view', 'aria-labelledby': 'sev-board-tab-' + state.view },
+          state.view === 'skills'
+            ? !state.loading && !state.error && skills.length === 0
+              ? h('div', { className: 'sev-empty' }, t.empty)
+              : visibleSkills.length === 0
+                ? h('div', { className: 'sev-empty' }, t.noMatch)
+                : visibleSkills.map((skill) =>
+                    h(SkillCard, {
+                      key: skill.skill,
+                      skill,
+                      t,
+                      lang,
+                      onTrace: (name) => store.set((current) => ({ ...current, view: 'steps', stepFilter: name })),
+                    }),
+                  )
+            : state.view === 'steps'
+              ? h(StepsView, {
+                  data,
+                  t,
+                  filter: state.stepFilter || '',
+                  onFilter: (name) => store.set((current) => ({ ...current, stepFilter: name })),
+                })
+              : state.view === 'runs'
+                ? h(RunsView, { data, t })
+                : state.view === 'mcp'
+                  ? h(McpView, { data, t, lang })
+                  : h(DevView, { data, t }),
+        ),
         configOpen
           ? h(
               'div',
@@ -1940,14 +2058,16 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'sev-advice-list' },
-                failing.slice(0, 8).map((tool) =>
-                  h(
-                    'div',
-                    { className: 'sev-sub-row', key: tool.server + '/' + tool.tool },
-                    h('span', null, tool.server + '/' + tool.tool),
-                    h('b', null, (tool.errors || 0) + '/' + (tool.calls || 0)),
+                failing
+                  .slice(0, 8)
+                  .map((tool) =>
+                    h(
+                      'div',
+                      { className: 'sev-sub-row', key: tool.server + '/' + tool.tool },
+                      h('span', null, tool.server + '/' + tool.tool),
+                      h('b', null, (tool.errors || 0) + '/' + (tool.calls || 0)),
+                    ),
                   ),
-                ),
               ),
             )
           : null,
@@ -1992,13 +2112,13 @@ window.__ModuleLoader__.load({
         [t.devLabels.api, DATA_URL],
         [
           t.devLabels.module,
-          (dev.moduleVersion ?? '—') +
-            ' / ' +
-            (dev.diskVersion ?? '—') +
-            (dev.skew ? ' ⚠ ' + t.devLabels.skew : ''),
+          (dev.moduleVersion ?? '—') + ' / ' + (dev.diskVersion ?? '—') + (dev.skew ? ' ⚠ ' + t.devLabels.skew : ''),
         ],
         [t.devLabels.routes, String(dev.routes ?? '—') + ' · ' + t.devLabels.tools + ' ' + String(dev.tools ?? '—')],
-        [t.devLabels.store, totals.storeError ? String(totals.storeError) : 'ok'],
+        [t.devLabels.settingsFile, dev.settingsFile || '—'],
+        [t.devLabels.warnings, String(dev.warnings ?? 0)],
+        [t.devLabels.inspect, dev.inspectProvider ? t.devLabels.ok : '—'],
+        [t.devLabels.store, totals.storeError ? String(totals.storeError) : t.devLabels.ok],
         [t.version, DATA_VERSION],
       ]
       return h(
@@ -2042,9 +2162,26 @@ window.__ModuleLoader__.load({
       const { lang, t } = useLang()
       const state = useStore()
 
+      const retryRef = useRef({ key: '', count: 0 })
       useEffect(() => {
         ensureReport()
       }, [sessionId, turn && turn.turn])
+      // ensureReport() has a 10 s warm-cache window; a turn that settles inside it
+      // has no turnLoads row yet and would render nothing forever. Retry twice.
+      useEffect(() => {
+        const turnNumber =
+          typeof turn?.turn === 'number' ? turn.turn : typeof turn?.number === 'number' ? turn.number : null
+        if (turnNumber === null) return undefined
+        const data = state.data
+        if (!data || !Array.isArray(data.turnLoads)) return undefined
+        if (data.turnLoads.some((row) => row.sessionId === sessionId && row.turn === turnNumber)) return undefined
+        const key = sessionId + ':' + turnNumber
+        if (retryRef.current.key !== key) retryRef.current = { key, count: 0 }
+        if (retryRef.current.count >= 2) return undefined
+        retryRef.current.count += 1
+        const timer = setTimeout(() => load(), 1200)
+        return () => clearTimeout(timer)
+      }, [sessionId, turn, state.data, state.fetchedAt])
 
       if (!turn) return null
       // `status` is 'closed' on current hosts; older/other builds may omit it or
@@ -2071,12 +2208,9 @@ window.__ModuleLoader__.load({
           (node) => node && node.location && node.location.turn && node.location.turn.turn === turnNumber,
         )
         toolCalls = inTurn.filter((node) => node.kind === 'tool-call').length
-        errors = inTurn.filter(
-          (node) =>
-            node.kind === 'tool-call' &&
-            node.data &&
-            (node.data.isError === true || (node.data.result && node.data.result.isError === true)),
-        ).length
+        // DSH's tool-call node payload is ToolChatData { root: ToolCallBlock }; the
+        // error flag lives on the settled root block, not on data.isError.
+        errors = inTurn.filter((node) => node?.kind === 'tool-call' && node.data?.root?.isError === true).length
       }
 
       const skills = [...new Set(rows.flatMap((row) => row.skills))]
@@ -2161,7 +2295,7 @@ window.__ModuleLoader__.load({
                           { key: (edit.at || '') + '-' + index },
                           (edit.verdict === 'accept' ? '✅ ' : edit.verdict === 'reject' ? '🚫 ' : '⚠️ ') +
                             (edit.dimension || 'static') +
-                            (edit.hypothesis ? ' · ' + edit.hypothesis.slice(0, 60) : ''),
+                            (edit.hypothesis ? ' · ' + String(edit.hypothesis).slice(0, 60) : ''),
                         ),
                       ),
                     )
@@ -2341,9 +2475,24 @@ window.__ModuleLoader__.load({
                             key: view,
                             type: 'button',
                             role: 'tab',
+                            id: 'sev-overlay-tab-' + view,
+                            'aria-controls': 'sev-overlay-view',
                             'aria-selected': state.view === view,
+                            tabIndex: state.view === view ? 0 : -1,
                             className: 'sev-tab' + (state.view === view ? ' sev-tab--on' : ''),
                             onClick: () => setView(view),
+                            onKeyDown: (event) => {
+                              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                              event.preventDefault()
+                              const views = ['skills', 'steps', 'runs', 'mcp', 'dev']
+                              const index = views.indexOf(view)
+                              const next =
+                                views[(index + (event.key === 'ArrowRight' ? 1 : views.length - 1)) % views.length]
+                              setView(next)
+                              const target =
+                                typeof document !== 'undefined' ? document.getElementById('sev-overlay-tab-' + next) : null
+                              if (target) target.focus()
+                            },
                           },
                           t.tabs[view],
                         ),
@@ -2383,7 +2532,12 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   'div',
-                  { className: 'sev-body' },
+                  {
+                    className: 'sev-body',
+                    role: 'tabpanel',
+                    id: 'sev-overlay-view',
+                    'aria-labelledby': 'sev-overlay-tab-' + state.view,
+                  },
                   state.loading && !data ? h('div', { className: 'sev-empty' }, t.loading) : null,
                   data && !data.scoring
                     ? h('div', { className: 'sev-stale' }, h('b', null, t.staleTitle), h('span', null, t.staleHint))
