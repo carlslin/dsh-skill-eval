@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -177,8 +177,20 @@ test('saving settings creates the data directory owner-only', async () => {
     const dir = path.join(root, 'nested', 'profile')
     await saveSettings(dir, { minSamples: 5 })
     assert.equal((await stat(dir)).mode & 0o777, 0o700)
+    assert.equal((await stat(path.join(dir, 'settings.json'))).mode & 0o777, 0o600)
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a leftover settings temp file does not leak its old mode', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'sev-settings-tmp-'))
+  try {
+    await writeFile(path.join(dir, 'settings.json.tmp'), 'stale', { mode: 0o644 })
+    await saveSettings(dir, { minSamples: 5 })
+    assert.equal((await stat(path.join(dir, 'settings.json'))).mode & 0o777, 0o600)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 })
 

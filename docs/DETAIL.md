@@ -27,10 +27,15 @@ Five append-only JSONL record types live in `$DSH_HOME/skill-eval/$DSH_PROFILE/e
 must not append foreign event types to it.
 
 The file is capped at **8 MB**: an append that would overflow it first drops the
-oldest half on a record boundary, so reports keep covering the newest history and
-a long-lived profile cannot grow without bound (a single record larger than the
-cap is still kept). Telemetry contains user message excerpts, so the data
-directory is created — and an existing one is tightened — to `0700`.
+oldest half on a record boundary — `edit` records keep up to a quarter of the
+cap ahead of the suffix, so the review ledger survives — and the trimmed file is
+at most half the cap, so a long-lived profile cannot grow without bound (a
+single record larger than the cap is still kept). Appends serialize across
+processes through `events.jsonl.lock`, a lock file treated as a crash leftover
+once it is 10 s stale, and every temp file is recreated `0600` before it is
+renamed into place. Telemetry contains user message excerpts, so a new data
+directory is created `0700` and every file inside it `0600`; an existing
+directory keeps whatever mode the user gave it.
 
 ```jsonc
 // written when a `skill` tool call completes

@@ -84,6 +84,7 @@ test('a settle writes markdown and json snapshots without touching the model', a
     assert.match(markdown, /pdf-tools/)
     assert.match(markdown, /88\.0/)
     assert.equal(json.skills[0].skill, 'pdf-tools')
+    assert.equal((await stat(path.join(dir, 'latest.json'))).mode & 0o777, 0o600)
     assert.equal(analyzer.calls.count, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })

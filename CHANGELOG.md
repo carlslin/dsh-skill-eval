@@ -2,6 +2,25 @@
 
 ## 1.20.4 — review fixes and hardening
 
+- **Existing data directories are never re-chmodded.** `ensurePrivateDir` only
+  creates new directories `0700`; a user-pointed `dataDir` keeps its mode, and
+  the files inside are written `0600` instead.
+- **Rotation keeps the `edit` audit ledger.** Dropped-prefix `edit` records are
+  carried ahead of the newest suffix, so the edit budget, board ledger and
+  impact view survive a trim.
+- **The 8 MB cap can no longer be exceeded by one record.** `rotateFile` no
+  longer re-checks the size the caller already decided on, so the file stays
+  at or under `maxBytes` after every append.
+- **Rotation cannot thrash.** Edits now count toward the same half-cap budget
+  as the newest suffix (up to a quarter of the cap), so a trimmed file always
+  leaves room for the next appends instead of rotating on every write.
+- **Appends serialize across processes.** `events.jsonl.lock` guards the
+  repair-rotate-append critical section (a lock older than 10 s is treated as
+  a crash leftover), so two hosts sharing one data dir stop losing records to
+  a replaced inode.
+- **Leftover `.tmp` files cannot leak a stale mode.** `writePrivateAtomic`
+  recreates the temp file with `0600` before renaming it, for the event log,
+  settings and snapshots alike.
 - **MCP tool advice names the tool in Chinese copy.** `mcp-tool-errors` and
   `mcp-tool-slow` now carry `tool`, so `withZhCopy` renders `gh/search` instead
   of `gh/`.
@@ -35,7 +54,7 @@
   invalid key as applied, and the load path warns once with the rejected keys.
 - **Docs test counts stay honest.** README, README.zh, CONTRIBUTING and the
   release checklist now say 272 tests.
-- Tests: **272 passing** (`npm test`).
+- Tests: **279 passing** (`npm test`).
 
 ## 1.20.3 — review hardening
 
