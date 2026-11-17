@@ -1,0 +1,1009 @@
+{
+  "generatedAt": "2026-11-14T18:22:30.452Z",
+  "dataDir": "/Users/adams/.dsh/skill-eval/default",
+  "mcpServers": [
+    {
+      "server": "context7",
+      "calls": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "avgMs": 2606,
+      "p50Ms": 2606,
+      "p95Ms": 2606,
+      "samples": 1,
+      "health": 88.9,
+      "grade": "B",
+      "tools": [
+        {
+          "tool": "query-docs",
+          "calls": 1,
+          "errors": 0,
+          "errorRate": 0
+        }
+      ]
+    }
+  ],
+  "mcpAdvice": [],
+  "runs": [
+    {
+      "sessionId": "session-88e59907-6c4a-47fc-a2dd-560b7596707a",
+      "firstAt": 1794652436368,
+      "lastAt": 1794677052417,
+      "loads": 12,
+      "closed": 16,
+      "toolCalls": 59,
+      "errors": 0,
+      "corrections": 0,
+      "mcpCalls": 1,
+      "mcpErrors": 0,
+      "loopErrors": 1,
+      "skills": ["caveman-help", "caveman-commit", "caveman-review", "caveman-compress"],
+      "score": {
+        "total": 94.6,
+        "grade": "A",
+        "confidence": "high",
+        "provisional": false,
+        "dimensions": {
+          "quality": 88.44999999999999,
+          "stability": 97.5,
+          "outcome": 100,
+          "efficiency": 100
+        },
+        "ci": {
+          "level": 0.95,
+          "low": 92.4,
+          "high": 95.4,
+          "resamples": 200
+        }
+      }
+    },
+    {
+      "sessionId": "ce9b6d13-60d0-4b7a-b09b-f1800e5db25d",
+      "firstAt": 1794653394823,
+      "lastAt": 1794654096759,
+      "loads": 1,
+      "closed": 2,
+      "toolCalls": 0,
+      "errors": 0,
+      "corrections": 0,
+      "mcpCalls": 0,
+      "mcpErrors": 0,
+      "loopErrors": 0,
+      "skills": ["caveman-help"],
+      "score": {
+        "total": 90.3,
+        "grade": "A",
+        "confidence": "low",
+        "provisional": true,
+        "dimensions": {
+          "quality": 89.6,
+          "stability": 100,
+          "outcome": 100,
+          "efficiency": 45
+        },
+        "ci": null
+      }
+    },
+    {
+      "sessionId": "a37dd6bb-1872-4c37-80d6-4cb888b6300d",
+      "firstAt": 1794653403222,
+      "lastAt": 1794654096759,
+      "loads": 1,
+      "closed": 2,
+      "toolCalls": 0,
+      "errors": 0,
+      "corrections": 0,
+      "mcpCalls": 0,
+      "mcpErrors": 0,
+      "loopErrors": 0,
+      "skills": ["caveman-help"],
+      "score": {
+        "total": 90.3,
+        "grade": "A",
+        "confidence": "low",
+        "provisional": true,
+        "dimensions": {
+          "quality": 89.6,
+          "stability": 100,
+          "outcome": 100,
+          "efficiency": 45
+        },
+        "ci": null
+      }
+    }
+  ],
+  "turnLoads": [
+    {
+      "sessionId": "session-88e59907-6c4a-47fc-a2dd-560b7596707a",
+      "turn": 40,
+      "skills": ["caveman-review"],
+      "firstAt": 1794676993087,
+      "lastAt": 1794676993087
+    },
+    {
+      "sessionId": "session-88e59907-6c4a-47fc-a2dd-560b7596707a",
+      "turn": 37,
+      "skills": ["caveman-review", "caveman-commit"],
+      "firstAt": 1794676476118,
+      "lastAt": 1794676484934
+    },
+    {
+      "sessionId": "session-88e59907-6c4a-47fc-a2dd-560b7596707a",
+      "turn": 32,
+      "skills": ["caveman-review"],
+      "firstAt": 1794675259897,
+      "lastAt": 1794675259897
+    }
+  ],
+  "ranking": {
+    "significant": false,
+    "ties": [
+      {
+        "a": "caveman-commit",
+        "b": "caveman-help",
+        "aTotal": 86.6,
+        "bTotal": 89.6
+      },
+      {
+        "a": "caveman-help",
+        "b": "caveman-review",
+        "aTotal": 89.6,
+        "bTotal": 90
+      }
+    ],
+    "note": "rank is not significant: \"caveman-commit\" (86.6) and \"caveman-help\" (89.6) have overlapping 95% intervals — treat them as a tie and fix the evidence, not the order"
+  },
+  "scoring": {
+    "weights": {
+      "static": 0.3,
+      "reliability": 0.25,
+      "effectiveness": 0.3,
+      "efficiency": 0.15
+    },
+    "weightsPercent": {
+      "static": 30,
+      "reliability": 25,
+      "effectiveness": 30,
+      "efficiency": 15
+    },
+    "thresholds": {
+      "excellent": 90,
+      "good": 80,
+      "pass": 70
+    },
+    "minSamples": 3,
+    "customizable": true
+  },
+  "totals": {
+    "invocations": 14,
+    "skills": 4,
+    "closed": 14,
+    "open": 0,
+    "storeError": null
+  },
+  "skills": [
+    {
+      "skill": "caveman-commit",
+      "source": "user-agents",
+      "firstAt": 1794656891105,
+      "lastAt": 1794676484934,
+      "stats": {
+        "loads": 3,
+        "closed": 3,
+        "open": 0,
+        "loadOk": 3,
+        "loadOkRate": 1,
+        "loadErrors": [],
+        "toolCalls": 6,
+        "errors": 0,
+        "errRate": 0,
+        "mcp": {},
+        "loopErrors": 0,
+        "llmRetries": 0,
+        "loopErrorRate": 0,
+        "loopErrorNames": {},
+        "correctionRate": 0,
+        "abandonRate": 0.3333333333333333,
+        "abandonBase": 3,
+        "siblingRate": 0.6666666666666666,
+        "avgCalls": 2,
+        "p50LoadMs": 810,
+        "corrections": [],
+        "siblings": {
+          "caveman-review": 1,
+          "caveman-compress": 1
+        },
+        "errorNames": {}
+      },
+      "staticQuality": {
+        "name": "caveman-commit",
+        "description": "Ultra-compressed commit message generator. Cuts noise from commit messages while preserving intent and reasoning. Conventional Commits format. Subject ≤50 chars, body only when \"why\" isn't obvious. Use when user says \"write a commit\", \"commit message\", \"generate commit\", \"/commit\", or invokes /caveman-commit. Auto-triggers when staging changes.\n",
+        "whenToUse": "",
+        "content": "Write commit messages terse and exact. Conventional Commits format. No fluff. Why over what.\n\n## Rules\n\n**Subject line:**\n- `<type>(<scope>): <imperative summary>` — `<scope>` optional\n- Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`, `build`, `ci`, `style`, `revert`\n- Imperative mood: \"add\", \"fix\", \"remove\" — not \"added\", \"adds\", \"adding\"\n- ≤50 chars when possible, hard cap 72\n- No trailing period\n- Match project convention for capitalization after the colon\n\n**Body (only if needed):**\n- Skip entirely when subject is self-explanatory\n- Add body only for: non-obvious *why*, breaking changes, migration notes, linked issues\n- Wrap at 72 chars\n- Bullets `-` not `*`\n- Reference issues/PRs at end: `Closes #42`, `Refs #17`\n\n**What NEVER goes in:**\n- \"This commit does X\", \"I\", \"we\", \"now\", \"currently\" — the diff says what\n- \"As requested by...\" — use Co-authored-by trailer\n- \"Generated with Claude Code\" or any AI attribution\n- Emoji (unless project convention requires)\n- Restating the file name when scope already says it\n\n## Examples\n\nDiff: new endpoint for user profile with body explaining the why\n- ❌ \"feat: add a new endpoint to get user profile information from the database\"\n- ✅\n  ```\n  feat(api): add GET /users/:id/profile\n\n  Mobile client needs profile data without the full user payload\n  to reduce LTE bandwidth on cold-launch screens.\n\n  Closes #128\n  ```\n\nDiff: breaking API change\n- ✅\n  ```\n  feat(api)!: rename /v1/orders to /v1/checkout\n\n  BREAKING CHANGE: clients on /v1/orders must migrate to /v1/checkout\n  before 2026-06-01. Old route returns 410 after that date.\n  ```\n\n## Auto-Clarity\n\nAlways include body for: breaking changes, security fixes, data migrations, anything reverting a prior commit. Never compress these into subject-only — future debuggers need the context.\n\n## Boundaries\n\nOnly generates the commit message. Does not run `git commit`, does not stage files, does not amend. Output the message as a code block ready to paste. \"stop caveman-commit\" or \"normal mode\": revert to verbose commit style.",
+        "bodyLines": 56,
+        "sectionCount": 4,
+        "source": "user-agents",
+        "provider": "filesystem",
+        "path": "/Users/adams/.agents/skills/caveman-commit/SKILL.md",
+        "resolved": true,
+        "checks": [
+          {
+            "id": "desc-length",
+            "label": "description length",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "desc-trigger",
+            "label": "description states when to use it",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "body-present",
+            "label": "body is substantive",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "body-compact",
+            "label": "body stays under the 500-line guidance",
+            "weight": 18,
+            "fraction": 1,
+            "points": 18
+          },
+          {
+            "id": "sections",
+            "label": "body is sectioned",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "no-placeholder",
+            "label": "no TODO/TBD placeholders",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "has-example",
+            "label": "contains a usage example",
+            "weight": 5,
+            "fraction": 1,
+            "points": 5
+          }
+        ],
+        "score": 77,
+        "failedChecks": [
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          }
+        ],
+        "capturedAt": 1794676484939,
+        "origin": "recorded"
+      },
+      "score": {
+        "total": 86.6,
+        "grade": "B",
+        "provisional": false,
+        "confidence": "medium",
+        "samples": 3,
+        "dimensions": {
+          "static": 77,
+          "reliability": 100,
+          "effectiveness": 78.33333333333334,
+          "efficiency": 100
+        },
+        "effectiveWeights": {
+          "static": 0.3,
+          "reliability": 0.25,
+          "effectiveness": 0.3,
+          "efficiency": 0.15
+        },
+        "coverage": 1,
+        "ci": {
+          "level": 0.95,
+          "low": 79.9,
+          "high": 93.1,
+          "resamples": 200
+        }
+      },
+      "advice": [
+        {
+          "id": "dead-load",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Loaded skills are often ignored",
+          "evidence": "33% of runs made zero tool calls after the load and produced no follow-through",
+          "fix": "Make the first screen of the skill an imperative checklist (\"step 1 do X with tool Y\"). A body that only explains background gets read and dropped."
+        },
+        {
+          "id": "trigger-collision",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Trigger surface overlaps another skill",
+          "evidence": "67% of runs loaded another skill in the same window: caveman-review×1, caveman-compress×1",
+          "fix": "Differentiate the description/whenToUse from the colliding skill and add explicit anti-triggers (\"do not use for …\")."
+        },
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        }
+      ],
+      "topAdvice": [
+        {
+          "id": "dead-load",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Loaded skills are often ignored",
+          "evidence": "33% of runs made zero tool calls after the load and produced no follow-through",
+          "fix": "Make the first screen of the skill an imperative checklist (\"step 1 do X with tool Y\"). A body that only explains background gets read and dropped."
+        },
+        {
+          "id": "trigger-collision",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Trigger surface overlaps another skill",
+          "evidence": "67% of runs loaded another skill in the same window: caveman-review×1, caveman-compress×1",
+          "fix": "Differentiate the description/whenToUse from the colliding skill and add explicit anti-triggers (\"do not use for …\")."
+        },
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        }
+      ]
+    },
+    {
+      "skill": "caveman-compress",
+      "source": "user-agents",
+      "firstAt": 1794674561455,
+      "lastAt": 1794674561455,
+      "stats": {
+        "loads": 1,
+        "closed": 1,
+        "open": 0,
+        "loadOk": 1,
+        "loadOkRate": 1,
+        "loadErrors": [],
+        "toolCalls": 1,
+        "errors": 0,
+        "errRate": 0,
+        "mcp": {},
+        "loopErrors": 1,
+        "llmRetries": 0,
+        "loopErrorRate": 1,
+        "loopErrorNames": {
+          "WorkingDirectoryError": 1
+        },
+        "correctionRate": 0,
+        "abandonRate": 0,
+        "abandonBase": 1,
+        "siblingRate": 0,
+        "avgCalls": 1,
+        "p50LoadMs": 813,
+        "corrections": [],
+        "siblings": {},
+        "errorNames": {}
+      },
+      "staticQuality": {
+        "name": "caveman-compress",
+        "description": "Compress natural language memory files (CLAUDE.md, todos, preferences) into caveman format to save input tokens. Preserves all technical substance, code, URLs, and structure. Compressed version overwrites the original file. Human-readable backup saved as FILE.original.md. Trigger: /caveman-compress FILEPATH or \"compress memory file\"\n",
+        "whenToUse": "",
+        "content": "# Caveman Compress\n\n## Purpose\n\nCompress natural language files (CLAUDE.md, todos, preferences) into caveman-speak to reduce input tokens. Compressed version overwrites original. Human-readable backup saved as `<filename>.original.md`.\n\n## Trigger\n\n`/caveman-compress <filepath>` or when user asks to compress a memory file.\n\n## Process\n\n1. The compression scripts live in `scripts/` (adjacent to this SKILL.md). If the path is not immediately available, search for `scripts/__main__.py` next to this SKILL.md.\n\n2. From the directory containing this SKILL.md, run:\n\npython3 -m scripts <absolute_filepath>\n\n3. The CLI will:\n- detect file type (no tokens)\n- call Claude to compress\n- validate output (no tokens)\n- if errors: cherry-pick fix with Claude (targeted fixes only, no recompression)\n- retry up to 2 times\n- if still failing after 2 retries: report error to user, leave original file untouched\n\n4. Return result to user\n\n## Compression Rules\n\n### Remove\n- Articles: a, an, the\n- Filler: just, really, basically, actually, simply, essentially, generally\n- Pleasantries: \"sure\", \"certainly\", \"of course\", \"happy to\", \"I'd recommend\"\n- Hedging: \"it might be worth\", \"you could consider\", \"it would be good to\"\n- Redundant phrasing: \"in order to\" → \"to\", \"make sure to\" → \"ensure\", \"the reason is because\" → \"because\"\n- Connective fluff: \"however\", \"furthermore\", \"additionally\", \"in addition\"\n\n### Preserve EXACTLY (never modify)\n- Code blocks (fenced ``` and indented)\n- Inline code (`backtick content`)\n- URLs and links (full URLs, markdown links)\n- File paths (`/src/components/...`, `./config.yaml`)\n- Commands (`npm install`, `git commit`, `docker build`)\n- Technical terms (library names, API names, protocols, algorithms)\n- Proper nouns (project names, people, companies)\n- Dates, version numbers, numeric values\n- Environment variables (`$HOME`, `NODE_ENV`)\n\n### Preserve Structure\n- All markdown headings (keep exact heading text, compress body below)\n- Bullet point hierarchy (keep nesting level)\n- Numbered lists (keep numbering)\n- Tables (compress cell text, keep structure)\n- Frontmatter/YAML headers in markdown files\n\n### Compress\n- Use short synonyms: \"big\" not \"extensive\", \"fix\" not \"implement a solution for\", \"use\" not \"utilize\"\n- Fragments OK: \"Run tests before commit\" not \"You should always run tests before committing\"\n- Drop \"you should\", \"make sure to\", \"remember to\" — just state the action\n- Merge redundant bullets that say the same thing differently\n- Keep one example where multiple examples show the same pattern\n\nCRITICAL RULE:\nAnything inside ``` ... ``` must be copied EXACTLY.\nDo not:\n- remove comments\n- remove spacing\n- reorder lines\n- shorten commands\n- simplify anything\n\nInline code (`...`) must be preserved EXACTLY.\nDo not modify anything inside backticks.\n\nIf file contains code blocks:\n- Treat code blocks as read-only regions\n- Only compress text outside them\n- Do not merge sections around code\n\n## Pattern\n\nOriginal:\n> You should always make sure to run the test suite before pushing any changes to the main branch. This is important because it helps catch bugs early and prevents broken builds from being deployed to production.\n\nCompressed:\n> Run tests before push to main. Catch bugs early, prevent broken prod deploys.\n\nOriginal:\n> The application uses a microservices architecture with the following components. The API gateway handles all incoming requests and routes them to the appropriate service. The authentication service is responsible for managing user sessions and JWT tokens.\n\nCompressed:\n> Microservices architecture. API gateway route all requests to services. Auth service manage user sessions + JWT tokens.\n\n## Boundaries\n\n- ONLY compress natural language files (.md, .txt, .typ, .typst, .tex, extensionless)\n- NEVER modify: .py, .js, .ts, .json, .yaml, .yml, .toml, .env, .lock, .css, .html, .xml, .sql, .sh\n- If file has mixed content (prose + code), compress ONLY the prose sections\n- If unsure whether something is code or prose, leave it unchanged\n- Original file is backed up as FILE.original.md before overwriting\n- Never compress FILE.original.md (skip it)",
+        "bodyLines": 102,
+        "sectionCount": 6,
+        "source": "user-agents",
+        "provider": "filesystem",
+        "path": "/Users/adams/.agents/skills/caveman-compress/SKILL.md",
+        "resolved": true,
+        "checks": [
+          {
+            "id": "desc-length",
+            "label": "description length",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "desc-trigger",
+            "label": "description states when to use it",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "body-present",
+            "label": "body is substantive",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "body-compact",
+            "label": "body stays under the 500-line guidance",
+            "weight": 18,
+            "fraction": 1,
+            "points": 18
+          },
+          {
+            "id": "sections",
+            "label": "body is sectioned",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 1,
+            "points": 15
+          },
+          {
+            "id": "no-placeholder",
+            "label": "no TODO/TBD placeholders",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "has-example",
+            "label": "contains a usage example",
+            "weight": 5,
+            "fraction": 1,
+            "points": 5
+          }
+        ],
+        "score": 92,
+        "failedChecks": [
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          }
+        ],
+        "capturedAt": 1794674561460,
+        "origin": "recorded"
+      },
+      "score": {
+        "total": 87.6,
+        "grade": "B",
+        "provisional": true,
+        "confidence": "low",
+        "samples": 1,
+        "dimensions": {
+          "static": 92,
+          "reliability": 60,
+          "effectiveness": 100,
+          "efficiency": 100
+        },
+        "effectiveWeights": {
+          "static": 0.3,
+          "reliability": 0.25,
+          "effectiveness": 0.3,
+          "efficiency": 0.15
+        },
+        "coverage": 1,
+        "ci": null
+      },
+      "advice": [
+        {
+          "id": "loop-errors",
+          "severity": "critical",
+          "dimension": "reliability",
+          "title": "The agent loop breaks after this skill is loaded",
+          "evidence": "100% of runs hit an agent-loop error after the load (WorkingDirectoryError×1)",
+          "fix": "The body is steering the model into an unreachable state (a tool or command that does not exist, an instruction that cannot be followed). Check every tool/command the body names and remove steps the loop cannot execute."
+        },
+        {
+          "id": "low-sample",
+          "severity": "info",
+          "dimension": "confidence",
+          "title": "Not enough evidence yet",
+          "evidence": "1 recorded load(s), 3 needed for a stable score",
+          "fix": "Treat the score as provisional; keep the plugin enabled and re-read after more runs."
+        }
+      ],
+      "topAdvice": [
+        {
+          "id": "loop-errors",
+          "severity": "critical",
+          "dimension": "reliability",
+          "title": "The agent loop breaks after this skill is loaded",
+          "evidence": "100% of runs hit an agent-loop error after the load (WorkingDirectoryError×1)",
+          "fix": "The body is steering the model into an unreachable state (a tool or command that does not exist, an instruction that cannot be followed). Check every tool/command the body names and remove steps the loop cannot execute."
+        },
+        {
+          "id": "low-sample",
+          "severity": "info",
+          "dimension": "confidence",
+          "title": "Not enough evidence yet",
+          "evidence": "1 recorded load(s), 3 needed for a stable score",
+          "fix": "Treat the score as provisional; keep the plugin enabled and re-read after more runs."
+        }
+      ]
+    },
+    {
+      "skill": "caveman-help",
+      "source": "user-agents",
+      "firstAt": 1794652436368,
+      "lastAt": 1794674525738,
+      "stats": {
+        "loads": 6,
+        "closed": 6,
+        "open": 0,
+        "loadOk": 6,
+        "loadOkRate": 1,
+        "loadErrors": [],
+        "toolCalls": 28,
+        "errors": 0,
+        "errRate": 0,
+        "mcp": {
+          "context7": {
+            "calls": 1,
+            "errors": 0,
+            "ms": 2606,
+            "windows": 1,
+            "samples": [2606],
+            "tools": {
+              "query-docs": {
+                "calls": 1,
+                "errors": 0
+              }
+            }
+          }
+        },
+        "loopErrors": 0,
+        "llmRetries": 0,
+        "loopErrorRate": 0,
+        "loopErrorNames": {},
+        "correctionRate": 0,
+        "abandonRate": 0.3333333333333333,
+        "abandonBase": 6,
+        "siblingRate": 0.16666666666666666,
+        "avgCalls": 4.666666666666667,
+        "p50LoadMs": 854.5,
+        "corrections": [],
+        "siblings": {
+          "caveman-commit": 1
+        },
+        "errorNames": {}
+      },
+      "staticQuality": {
+        "name": "caveman-help",
+        "description": "Quick-reference card for all caveman modes, skills, and commands. One-shot display, not a persistent mode. Trigger: /caveman-help, \"caveman help\", \"what caveman commands\", \"how do I use caveman\".\n",
+        "whenToUse": "",
+        "content": "# Caveman Help\n\nDisplay this reference card when invoked. One-shot — do NOT change mode, write flag files, or persist anything. Output in caveman style.\n\n## Modes\n\n| Mode | Trigger | What change |\n|------|---------|-------------|\n| **Lite** | `/caveman lite` | Drop filler. Keep sentence structure. |\n| **Full** | `/caveman` | Drop articles, filler, pleasantries, hedging. Fragments OK. Default. |\n| **Ultra** | `/caveman ultra` | Extreme compression. Bare fragments. Tables over prose. |\n| **Wenyan-Lite** | `/caveman wenyan-lite` | Classical Chinese style, light compression. |\n| **Wenyan-Full** | `/caveman wenyan` | Full 文言文. Maximum classical terseness. |\n| **Wenyan-Ultra** | `/caveman wenyan-ultra` | Extreme. Ancient scholar on a budget. |\n\nMode stick until changed or session end.\n\n## Skills\n\n| Skill | Trigger | What it do |\n|-------|---------|-----------|\n| **caveman-commit** | `/caveman-commit` | Terse commit messages. Conventional Commits. ≤50 char subject. |\n| **caveman-review** | `/caveman-review` | One-line PR comments: `L42: bug: user null. Add guard.` |\n| **caveman-compress** | `/caveman-compress <file>` | Compress .md files to caveman prose. Saves ~46% input tokens. |\n| **caveman-help** | `/caveman-help` | This card. |\n\n## Deactivate\n\nSay \"stop caveman\" or \"normal mode\". Resume anytime with `/caveman`.\n\n## Configure Default Mode\n\nDefault mode = `full`. Change it:\n\n**Environment variable** (highest priority):\n```bash\nexport CAVEMAN_DEFAULT_MODE=ultra\n```\n\n**Config file** (`~/.config/caveman/config.json`):\n```json\n{ \"defaultMode\": \"lite\" }\n```\n\nSet `\"off\"` to disable auto-activation on session start. User can still activate manually with `/caveman`.\n\nResolution: env var > config file > `full`.\n\n## More\n\nFull docs: https://github.com/JuliusBrussee/caveman",
+        "bodyLines": 51,
+        "sectionCount": 5,
+        "source": "user-agents",
+        "provider": "filesystem",
+        "path": "/Users/adams/.agents/skills/caveman-help/SKILL.md",
+        "resolved": true,
+        "checks": [
+          {
+            "id": "desc-length",
+            "label": "description length",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "desc-trigger",
+            "label": "description states when to use it",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "body-present",
+            "label": "body is substantive",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "body-compact",
+            "label": "body stays under the 500-line guidance",
+            "weight": 18,
+            "fraction": 1,
+            "points": 18
+          },
+          {
+            "id": "sections",
+            "label": "body is sectioned",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "no-placeholder",
+            "label": "no TODO/TBD placeholders",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "has-example",
+            "label": "contains a usage example",
+            "weight": 5,
+            "fraction": 1,
+            "points": 5
+          }
+        ],
+        "score": 77,
+        "failedChecks": [
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          }
+        ],
+        "capturedAt": 1794674525806,
+        "origin": "recorded"
+      },
+      "score": {
+        "total": 89.6,
+        "grade": "B",
+        "provisional": false,
+        "confidence": "medium",
+        "samples": 6,
+        "dimensions": {
+          "static": 77,
+          "reliability": 100,
+          "effectiveness": 88.33333333333334,
+          "efficiency": 100
+        },
+        "effectiveWeights": {
+          "static": 0.3,
+          "reliability": 0.25,
+          "effectiveness": 0.3,
+          "efficiency": 0.15
+        },
+        "coverage": 1,
+        "ci": {
+          "level": 0.95,
+          "low": 86.9,
+          "high": 91.9,
+          "resamples": 200
+        }
+      },
+      "advice": [
+        {
+          "id": "dead-load",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Loaded skills are often ignored",
+          "evidence": "33% of runs made zero tool calls after the load and produced no follow-through",
+          "fix": "Make the first screen of the skill an imperative checklist (\"step 1 do X with tool Y\"). A body that only explains background gets read and dropped."
+        },
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        }
+      ],
+      "topAdvice": [
+        {
+          "id": "dead-load",
+          "severity": "warning",
+          "dimension": "effectiveness",
+          "title": "Loaded skills are often ignored",
+          "evidence": "33% of runs made zero tool calls after the load and produced no follow-through",
+          "fix": "Make the first screen of the skill an imperative checklist (\"step 1 do X with tool Y\"). A body that only explains background gets read and dropped."
+        },
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        }
+      ]
+    },
+    {
+      "skill": "caveman-review",
+      "source": "user-agents",
+      "firstAt": 1794656895678,
+      "lastAt": 1794676993087,
+      "stats": {
+        "loads": 4,
+        "closed": 4,
+        "open": 0,
+        "loadOk": 4,
+        "loadOkRate": 1,
+        "loadErrors": [],
+        "toolCalls": 11,
+        "errors": 0,
+        "errRate": 0,
+        "mcp": {},
+        "loopErrors": 0,
+        "llmRetries": 0,
+        "loopErrorRate": 0,
+        "loopErrorNames": {},
+        "correctionRate": 0,
+        "abandonRate": 0,
+        "abandonBase": 4,
+        "siblingRate": 0.25,
+        "avgCalls": 2.75,
+        "p50LoadMs": 798.5,
+        "corrections": [],
+        "siblings": {
+          "caveman-commit": 1
+        },
+        "errorNames": {}
+      },
+      "staticQuality": {
+        "name": "caveman-review",
+        "description": "Ultra-compressed code review comments. Cuts noise from PR feedback while preserving the actionable signal. Each comment is one line: location, problem, fix. Use when user says \"review this PR\", \"code review\", \"review the diff\", \"/review\", or invokes /caveman-review. Auto-triggers when reviewing pull requests.\n",
+        "whenToUse": "",
+        "content": "Write code review comments terse and actionable. One line per finding. Location, problem, fix. No throat-clearing.\n\n## Rules\n\n**Format:** `L<line>: <problem>. <fix>.` — or `<file>:L<line>: ...` when reviewing multi-file diffs.\n\n**Severity prefix (optional, when mixed):**\n- `🔴 bug:` — broken behavior, will cause incident\n- `🟡 risk:` — works but fragile (race, missing null check, swallowed error)\n- `🔵 nit:` — style, naming, micro-optim. Author can ignore\n- `❓ q:` — genuine question, not a suggestion\n\n**Drop:**\n- \"I noticed that...\", \"It seems like...\", \"You might want to consider...\"\n- \"This is just a suggestion but...\" — use `nit:` instead\n- \"Great work!\", \"Looks good overall but...\" — say it once at the top, not per comment\n- Restating what the line does — the reviewer can read the diff\n- Hedging (\"perhaps\", \"maybe\", \"I think\") — if unsure use `q:`\n\n**Keep:**\n- Exact line numbers\n- Exact symbol/function/variable names in backticks\n- Concrete fix, not \"consider refactoring this\"\n- The *why* if the fix isn't obvious from the problem statement\n\n## Examples\n\n❌ \"I noticed that on line 42 you're not checking if the user object is null before accessing the email property. This could potentially cause a crash if the user is not found in the database. You might want to add a null check here.\"\n\n✅ `L42: 🔴 bug: user can be null after .find(). Add guard before .email.`\n\n❌ \"It looks like this function is doing a lot of things and might benefit from being broken up into smaller functions for readability.\"\n\n✅ `L88-140: 🔵 nit: 50-line fn does 4 things. Extract validate/normalize/persist.`\n\n❌ \"Have you considered what happens if the API returns a 429? I think we should probably handle that case.\"\n\n✅ `L23: 🟡 risk: no retry on 429. Wrap in withBackoff(3).`\n\n## Auto-Clarity\n\nDrop terse mode for: security findings (CVE-class bugs need full explanation + reference), architectural disagreements (need rationale, not just a one-liner), and onboarding contexts where the author is new and needs the \"why\". In those cases write a normal paragraph, then resume terse for the rest.\n\n## Boundaries\n\nReviews only — does not write the code fix, does not approve/request-changes, does not run linters. Output the comment(s) ready to paste into the PR. \"stop caveman-review\" or \"normal mode\": revert to verbose review style.",
+        "bodyLines": 46,
+        "sectionCount": 4,
+        "source": "user-agents",
+        "provider": "filesystem",
+        "path": "/Users/adams/.agents/skills/caveman-review/SKILL.md",
+        "resolved": true,
+        "integrity": {
+          "checked": 0,
+          "missing": [],
+          "ok": true
+        },
+        "checks": [
+          {
+            "id": "desc-length",
+            "label": "description length",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "desc-trigger",
+            "label": "description states when to use it",
+            "weight": 12,
+            "fraction": 1,
+            "points": 12
+          },
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "body-present",
+            "label": "body is substantive",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "body-compact",
+            "label": "body stays under the 500-line guidance",
+            "weight": 18,
+            "fraction": 1,
+            "points": 18
+          },
+          {
+            "id": "sections",
+            "label": "body is sectioned",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "no-placeholder",
+            "label": "no TODO/TBD placeholders",
+            "weight": 10,
+            "fraction": 1,
+            "points": 10
+          },
+          {
+            "id": "has-example",
+            "label": "contains a usage example",
+            "weight": 5,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "anti-trigger",
+            "label": "states when NOT to use it",
+            "weight": 5,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "skill-name",
+            "label": "skill id is a kebab-case name",
+            "weight": 4,
+            "fraction": 1,
+            "points": 4
+          },
+          {
+            "id": "reference-integrity",
+            "label": "every referenced file exists",
+            "weight": 8,
+            "fraction": 1,
+            "points": 8
+          }
+        ],
+        "score": 71.8,
+        "failedChecks": [
+          {
+            "id": "when-to-use",
+            "label": "explicit whenToUse field",
+            "weight": 8,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "progressive-disclosure",
+            "label": "delegates detail to references/ or scripts/",
+            "weight": 15,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "has-example",
+            "label": "contains a usage example",
+            "weight": 5,
+            "fraction": 0,
+            "points": 0
+          },
+          {
+            "id": "anti-trigger",
+            "label": "states when NOT to use it",
+            "weight": 5,
+            "fraction": 0,
+            "points": 0
+          }
+        ],
+        "capturedAt": 1794676993092,
+        "origin": "recorded"
+      },
+      "score": {
+        "total": 90,
+        "grade": "A",
+        "provisional": false,
+        "confidence": "medium",
+        "samples": 4,
+        "dimensions": {
+          "static": 71.8,
+          "reliability": 100,
+          "effectiveness": 95,
+          "efficiency": 100
+        },
+        "effectiveWeights": {
+          "static": 0.3,
+          "reliability": 0.25,
+          "effectiveness": 0.3,
+          "efficiency": 0.15
+        },
+        "coverage": 1,
+        "ci": {
+          "level": 0.95,
+          "low": 87,
+          "high": 91.5,
+          "resamples": 200
+        }
+      },
+      "advice": [
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        },
+        {
+          "id": "no-example",
+          "severity": "info",
+          "dimension": "static",
+          "title": "No concrete example",
+          "evidence": "no fenced code block in the body",
+          "fix": "Add one minimal worked example; models copy examples far more reliably than they follow prose."
+        }
+      ],
+      "topAdvice": [
+        {
+          "id": "no-progressive-disclosure",
+          "severity": "info",
+          "dimension": "static",
+          "title": "Everything lives in one file",
+          "evidence": "no `references/`, `scripts/` or `assets/` usage detected",
+          "fix": "Move long reference material to `references/` and executable steps to `scripts/`, then point at them from the body."
+        },
+        {
+          "id": "no-example",
+          "severity": "info",
+          "dimension": "static",
+          "title": "No concrete example",
+          "evidence": "no fenced code block in the body",
+          "fix": "Add one minimal worked example; models copy examples far more reliably than they follow prose."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# bundle patch for dsh-skill-eval: inserts the plugin row into the profile roster.
+# Applied as a profile bundle layer (the `dsh.bundle.patch` manifest field).
+- insert:
+    - id: skill-eval
+      name: dsh-skill-eval
+      config:
+        enabled: true
+        windowToolCalls: 12
+        minSamples: 3

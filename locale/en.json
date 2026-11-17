@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Skill eval",
+    "description": "Score skills from live execution telemetry and turn the evidence into cited fixes."
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "name": "dsh-skill-eval",
+  "version": "1.20.2",
+  "description": "Skill execution telemetry & effectiveness scoring for DeepSeek Harness: records every skill load, folds the follow-up window into evidence, scores each skill and hands the agent concrete optimization advice.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/en.json": "./locale/en.json",
+    "./locale/zh.json": "./locale/zh.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "icon": "icon.svg",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:fast": "node scripts/build.mjs --fast",
+    "build:pack": "node scripts/build.mjs --pack",
+    "build:install": "node scripts/build.mjs --install",
+    "build:client": "node scripts/build-client.mjs",
+    "prepack": "node scripts/build-client.mjs",
+    "pretest": "node scripts/build-client.mjs",
+    "test": "node --test test/",
+    "accept": "node scripts/accept.mjs",
+    "verify": "node scripts/verify-live.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "release:check": "npm run build:client && npm run format:check && npm run lint && node scripts/doctor.mjs --release && node --test test/ && node scripts/accept.mjs",
+    "release:pack": "npm pack --pack-destination dist",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings=0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "docs/*.md",
+    "README.md",
+    "README.zh.md",
+    "scripts",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlslin/dsh-skill-eval.git"
+  },
+  "homepage": "https://github.com/carlslin/dsh-skill-eval#readme",
+  "bugs": {
+    "url": "https://github.com/carlslin/dsh-skill-eval/issues"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.19.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "jsdom": "^25.0.1",
+    "prettier": "^3.10.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "bin": {
+    "dsh-skill-eval-verify": "scripts/verify-live.mjs",
+    "dsh-skill-eval-doctor": "scripts/doctor.mjs",
+    "dsh-skill-eval-accept": "scripts/accept.mjs"
+  },
+  "author": "dsh-skill-eval contributors",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "plugin",
+    "skills",
+    "telemetry",
+    "evaluation",
+    "scoring"
+  ]
+}
