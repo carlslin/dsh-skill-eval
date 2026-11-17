@@ -26,6 +26,12 @@ Five append-only JSONL record types live in `$DSH_HOME/skill-eval/$DSH_PROFILE/e
 `edit` (the review ledger). The session log is **never** written to — plugins
 must not append foreign event types to it.
 
+The file is capped at **8 MB**: an append that would overflow it first drops the
+oldest half on a record boundary, so reports keep covering the newest history and
+a long-lived profile cannot grow without bound (a single record larger than the
+cap is still kept). Telemetry contains user message excerpts, so the data
+directory is created — and an existing one is tightened — to `0700`.
+
 ```jsonc
 // written when a `skill` tool call completes
 { "t": "skill", "v": 1, "at": 1763, "sessionId": "…", "callId": "…",

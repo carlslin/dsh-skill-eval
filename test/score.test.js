@@ -351,3 +351,9 @@ test('tokens per load only divides by windows that actually carried usage', () =
   const cheap = aggregate([withTokens])
   assert.equal(cheap.tokensPerLoad, 1500)
 })
+
+test('aggregate keeps only the last five load error messages', () => {
+  const stats = aggregate(Array.from({ length: 10 }, () => sample({ ok: false, error: 'boom', window: null })))
+  assert.equal(stats.loadErrors.length, 5)
+  assert.equal(stats.loads - stats.loadOk, 10)
+})

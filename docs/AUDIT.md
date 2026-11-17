@@ -52,9 +52,9 @@ the fixes have regression tests (`test/audit-regressions.test.js`, `test/store.t
 
 ## Deferred / residual
 
-- Store rotation/compaction is still absent. The report cache removes the repeated
-  cost, but a very long-lived profile keeps every record. A future version should
-  roll `events.jsonl` monthly or keep N windows per skill.
+- Store rotation: **fixed in 1.20.4** — `events.jsonl` is capped at 8 MB and
+  drops its oldest half on a record boundary, so a very long-lived profile keeps
+  the newest history instead of every record.
 - DNS-rebinding **read** protection belongs to the DSH host's trust layer; this
   plugin now fences writes only.
 - Client still loses scroll position when the main panel unmounts, and long
@@ -80,3 +80,11 @@ the fixes have regression tests (`test/audit-regressions.test.js`, `test/store.t
 | 失败加载不污染证据                             | 失败 `skill` 仍会 `openWindow`，turn-end 落盘并可能顶掉上一个技能窗口                                                 | 仅成功加载开窗；turn-end/dispose 后测试断言无 window                                                                                   |
 
 仍未消除的残余风险：DNS rebinding 的**读**（`/data` 可被同源 rebinding 页面读取）依赖 DSH 宿主级围栏；插件侧只围栏写。
+
+## 1.20.4 加固（Hardening）
+
+- **事件文件有界**：`events.jsonl` 超过 8 MB 时在记录边界丢弃最旧一半，长期运行不再无限增长；单条超长记录仍会保留。
+- **500 不再回显内部错误**：`/data`、看板与配置页把细节写入诊断日志，响应只返回固定文案。
+- **数据目录私有**：遥测/设置/报告目录以 `0700` 创建，旧版本留下的可读目录在首次写入时收紧（自定义 `DSH_SKILL_EVAL_DIR` 同样适用）。
+- **被拒绝的已保存设置可见**：`view:"dev"` 输出 `settingsErrors` 与 `settings-invalid` finding，不再把非法键算作已生效。
+- 测试：272 项全绿。

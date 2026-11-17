@@ -74,7 +74,15 @@ function packageVersion() {
 const PLUGIN_VERSION = packageVersion()
 
 /** Per-apply diagnostics surfaced by the `dev` view (the restart-skew detector). */
-const DIAGNOSTICS = { routes: [], tools: [], inspectProvider: false, warnings: [], settingsFile: null, settings: {} }
+const DIAGNOSTICS = {
+  routes: [],
+  tools: [],
+  inspectProvider: false,
+  warnings: [],
+  settingsFile: null,
+  settings: {},
+  settingsErrors: [],
+}
 
 // cordis 4 resolves `inject` as an array or a name -> config map, with no
 // required/optional split. Optional services are attached with `ctx.inject(...)`
@@ -359,6 +367,7 @@ async function runReport(analyzer, args, config) {
       dataDir: analyzer.store.dir,
       settingsFile: DIAGNOSTICS.settingsFile,
       settings: DIAGNOSTICS.settings,
+      settingsErrors: DIAGNOSTICS.settingsErrors,
       config: config,
       routes: DIAGNOSTICS.routes,
       records,
@@ -478,12 +487,26 @@ export function apply(ctx, config) {
   DIAGNOSTICS.warnings = []
   DIAGNOSTICS.inspectProvider = false
   let settingsDir = null
+  // Diagnostics must show what was actually applied: a hand-edited value that
+  // fails validation is dropped from the config, so it must not be reported as
+  // saved (nor silently disappear without a warning).
+  const refreshSettingsDiagnostics = () => {
+    const normalized = normalizeSettings(settingsDir ? loadSettingsSync(settingsDir) : {})
+    DIAGNOSTICS.settings = normalized.values
+    DIAGNOSTICS.settingsErrors = normalized.errors
+    return normalized
+  }
   try {
     settingsDir = resolveDataDir(cfg)
-    const saved = loadSettingsSync(settingsDir)
-    applySettings(cfg, saved)
+    const { values, errors } = refreshSettingsDiagnostics()
+    applySettings(cfg, values)
     DIAGNOSTICS.settingsFile = settingsDir ? path.join(settingsDir, SETTINGS_FILE) : null
-    DIAGNOSTICS.settings = saved ?? {}
+    if (errors.length > 0)
+      log(
+        ctx,
+        'warn',
+        `skill-eval ignored ${errors.length} invalid saved setting(s): ${errors.map((item) => item.key).join(', ')}`,
+      )
   } catch (error) {
     log(ctx, 'warn', `skill-eval settings load failed: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -863,8 +886,9 @@ export function apply(ctx, config) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         res.end(renderHtml(report, { base: pageBase, lang }))
       } catch (error) {
+        log(ctx, 'warn', `dashboard failed: ${error instanceof Error ? error.message : String(error)}`)
         res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
-        res.end(`skill-eval dashboard failed: ${error instanceof Error ? error.message : String(error)}`)
+        res.end('skill-eval dashboard failed')
       }
     }
 
@@ -892,7 +916,7 @@ export function apply(ctx, config) {
           if (settingsDir) await updateSettings(settingsDir, values)
           applySettings(cfg, values)
           analyzer.invalidate()
-          DIAGNOSTICS.settings = loadSettingsSync(settingsDir)
+          refreshSettingsDiagnostics()
           send(200, renderConfigHtml({ config: cfg, base: pageBase, saved: true, lang }))
           return
         }
@@ -973,7 +997,7 @@ export function apply(ctx, config) {
           if (settingsDir) await updateSettings(settingsDir, values)
           applySettings(cfg, values)
           analyzer.invalidate()
-          DIAGNOSTICS.settings = loadSettingsSync(settingsDir)
+          refreshSettingsDiagnostics()
           send(200, { saved: true, errors: [], values: settingsPayload().values })
           return
         }
@@ -1024,8 +1048,9 @@ export function apply(ctx, config) {
                 try {
                   await writeReport(res)
                 } catch (error) {
+                  log(ctx, 'warn', `data failed: ${error instanceof Error ? error.message : String(error)}`)
                   res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
-                  res.end(`skill-eval data failed: ${error instanceof Error ? error.message : String(error)}`)
+                  res.end('skill-eval data failed')
                 }
               },
             })
@@ -1116,8 +1141,9 @@ export function apply(ctx, config) {
                 res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
                 res.end(renderHtml(report, { base, lang }))
               } catch (error) {
+                log(ctx, 'warn', `dashboard failed: ${error instanceof Error ? error.message : String(error)}`)
                 res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
-                res.end(`skill-eval dashboard failed: ${error instanceof Error ? error.message : String(error)}`)
+                res.end('skill-eval dashboard failed')
               }
             },
           })

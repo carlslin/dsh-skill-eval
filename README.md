@@ -30,6 +30,8 @@ is a DSH plugin rather than a CLI.
 - `/skill-eval [skill]` command — same report in the composer
 - `/skill-eval/board/<version>` — HTML board with grades, dimension bars and top fixes
 - append-only JSONL telemetry in `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
+  (bounded to 8 MB: the oldest records are trimmed once it fills, so a long-lived
+  profile cannot grow without limit)
 
 ## Screenshots
 
@@ -166,7 +168,7 @@ the matching `dist/` artifact.
 Editing `client/*.js` requires rebuilding the single-file browser bundle:
 
 ```bash
-npm run build          # format check → lint → client build → doctor → 258 tests
+npm run build          # format check → lint → client build → doctor → 272 tests
 npm run build:fast     # client build + doctor only
 npm run build:pack     # full build + dist/dsh-skill-eval-<version>.tgz
 npm run build:install  # pack + install into the desktop profile
@@ -181,7 +183,7 @@ npm run build:install  # pack + install into the desktop profile
 node --test test/
 ```
 
-258 tests (`npm test` rebuilds the browser bundle first): scoring bands, static checks, correction detection,
+272 tests (`npm test` rebuilds the browser bundle first): scoring bands, static checks, correction detection,
 window lifecycle (turn-end snapshot → correction → close), store round-trip with
 a torn line, analyzer join, markdown/HTML rendering incl. escaping and bilingual
 advice copy, host route registration under duplicate-route pressure, and the

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -169,4 +169,29 @@ test('the configuration page lists every field and reports save state', () => {
   })
   assert.match(broken, /有 1 个字段未保存/)
   assert.match(broken, /minSamples/)
+})
+
+test('saving settings creates the data directory owner-only', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sev-settings-mode-'))
+  try {
+    const dir = path.join(root, 'nested', 'profile')
+    await saveSettings(dir, { minSamples: 5 })
+    assert.equal((await stat(dir)).mode & 0o777, 0o700)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a cleared numeric field is an error, not a silent zero', () => {
+  for (const raw of ['', null]) {
+    const { values, errors } = normalizeSettings({ 'weights.static': raw })
+    assert.equal('weights.static' in values, false, JSON.stringify(raw))
+    assert.ok(
+      errors.some((error) => error.key === 'weights.static'),
+      JSON.stringify(raw),
+    )
+  }
+  const { values, errors } = normalizeSettings({ 'weights.static': '0' })
+  assert.deepEqual(errors, [])
+  assert.equal(values['weights.static'], 0)
 })

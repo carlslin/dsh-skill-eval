@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.20.4 — review fixes and hardening
+
+- **MCP tool advice names the tool in Chinese copy.** `mcp-tool-errors` and
+  `mcp-tool-slow` now carry `tool`, so `withZhCopy` renders `gh/search` instead
+  of `gh/`.
+- **Edit impact counts failed loads as failures.** `buildImpact` only judges
+  closed or failed samples and scores `!ok` as an error, so an edit after which
+  every load fails reads `degraded`, not `improved`.
+- **The final step of a turn is flushed even without a skill window.**
+  `turn-stopping` now flushes the open step before the windows check, so the
+  last step is not carried into the next turn's duration or lost entirely.
+- **The dead-load noise gate resamples the same base as `abandonRate`.** Root
+  windows with `evicted` censored, matching `aggregate`, so a swarm of
+  zero-call subagent runs can no longer push the rule to `warning`.
+- **`loadErrors` is capped at five messages.** The aggregate keeps the last 5;
+  the failed count still comes from `loads - loadOk`.
+- **A cleared numeric setting is an error, not a silent zero.** Blank strings,
+  `null` and booleans now hit `not a number` instead of `Number(raw)` giving 0.
+- **Saved settings.json values are normalized before applying.** A hand-edited
+  `"windowTtlMs": "30m"` is rejected instead of being applied raw as NaN.
+- **`events.jsonl` is bounded.** An append that would push the file past 8 MB
+  first drops the oldest half on a record boundary, so a long-lived profile
+  stops growing without limit; the newest records always survive (a single
+  record larger than the cap is still kept).
+- **500 responses no longer echo the internal error.** `/data`, the board and
+  the config page log the detail to diagnostics and return a fixed message, so a
+  corrupted store cannot leak paths or internal messages to the page.
+- **The data directory is private.** Telemetry carries user message excerpts;
+  the store/settings/report directories are created `0700` and an existing
+  world-readable data directory is tightened on the first write.
+- **Rejected saved settings are visible in diagnostics.** `view:"dev"` reports
+  `settingsErrors` plus a `settings-invalid` finding instead of counting an
+  invalid key as applied, and the load path warns once with the rejected keys.
+- **Docs test counts stay honest.** README, README.zh, CONTRIBUTING and the
+  release checklist now say 272 tests.
+- Tests: **272 passing** (`npm test`).
+
 ## 1.20.3 — review hardening
 
 A full independent review (host, client, tests/packaging, plus a second-model

@@ -416,3 +416,35 @@ test('a slow MCP tool gets its own warning with latency evidence', () => {
     false,
   )
 })
+
+test('MCP tool advice fills the tool name into the Chinese title', () => {
+  const advice = buildMcpAdvice([
+    {
+      server: 'gh',
+      calls: 4,
+      errors: 4,
+      errorRate: 1,
+      tools: [{ tool: 'search', calls: 4, errors: 4, p95Ms: 9000 }],
+    },
+  ])
+  const toolRules = advice.filter((item) => item.id === 'mcp-tool-errors' || item.id === 'mcp-tool-slow')
+  assert.equal(toolRules.length, 2)
+  for (const item of toolRules) assert.match(item.titleZh, /gh\/search/, item.id)
+})
+
+test('the dead-load gate resamples the same root windows the rate is judged on', () => {
+  const windows = [
+    { toolCalls: 0, origin: null },
+    { toolCalls: 3, origin: null },
+    { toolCalls: 3, origin: null },
+    ...Array.from({ length: 27 }, () => ({ toolCalls: 0, origin: 'subagent' })),
+  ]
+  const samples = windows.map((w) =>
+    sample({ window: { errors: 0, errorNames: [], corrections: [], otherSkills: [], turnEnded: true, ...w } }),
+  )
+  const stats = aggregate(samples)
+  assert.ok(stats.abandonRate > 0.3)
+  const advice = buildAdvice({ stats, static: null, score: { dimensions: {} }, minSamples: 3, windows })
+  const rule = advice.find((item) => item.id === 'dead-load')
+  assert.ok(rule === undefined || rule.severity !== 'warning')
+})

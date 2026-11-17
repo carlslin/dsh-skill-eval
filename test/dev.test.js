@@ -68,6 +68,21 @@ test('missing telemetry, tools, routes and store failures are reported', () => {
   assert.match(text, /no event|no telemetry/i)
 })
 
+test('a rejected saved setting becomes a finding instead of a silent drop', () => {
+  const dev = buildDevReport(
+    base({
+      settings: { minSamples: 5 },
+      settingsErrors: [{ key: 'windowTtlMs', message: 'not a number: 30m' }],
+    }),
+  )
+  const finding = dev.findings.find((item) => item.code === 'settings-invalid')
+  assert.ok(finding, 'settings-invalid finding missing')
+  assert.match(finding.detail, /windowTtlMs/)
+  assert.equal(dev.settingsKeys, 1)
+  assert.equal(dev.settingsErrors, 1)
+  assert.match(renderDevMarkdown(dev), /1 key\(s\), 1 rejected/)
+})
+
 test('the rendered diagnostics summarize versions, store and routes', () => {
   const text = renderDevMarkdown(buildDevReport(base()))
   assert.match(text, /## Developer diagnostics/)

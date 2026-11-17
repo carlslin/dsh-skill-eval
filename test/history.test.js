@@ -110,6 +110,29 @@ test('impact is inconclusive without two loads on each side', () => {
   assert.match(impact.comparisons[0].note, /needs 2 closed loads/)
 })
 
+test('impact counts failed loads after an edit as errors, not as clean runs', () => {
+  const recs = records([
+    { calls: 2, errors: 1 },
+    { calls: 2, errors: 1 },
+    { calls: 2, errors: 0 },
+  ])
+  recs.push({ t: 'edit', at: now + 10_000, skill: 'pdf-tools', verdict: 'accept', dimension: 'reliability' })
+  for (let i = 0; i < 3; i += 1) {
+    recs.push({
+      t: 'skill',
+      at: now + 11_000 + i * 1000,
+      sessionId: 's',
+      skill: 'pdf-tools',
+      callId: `f${i}`,
+      ok: false,
+      error: 'ENOENT: SKILL.md',
+    })
+  }
+  const comparison = buildImpact(recs, 'pdf-tools').comparisons[0]
+  assert.equal(comparison.after.loads, 3)
+  assert.equal(comparison.verdict, 'degraded')
+})
+
 test('impact with no edits explains the review step', () => {
   assert.match(
     renderImpactMarkdown(buildImpact(records([{ calls: 1, errors: 0 }]), 'pdf-tools')),

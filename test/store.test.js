@@ -1,14 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, appendFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { EventStore } from '../lib/store.js'
 
-async function withStore(fn) {
+async function withStore(fn, options = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'sev-store-'))
   try {
-    return await fn(new EventStore(dir), dir)
+    return await fn(new EventStore(dir, options), dir)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -32,6 +32,58 @@ test('a torn tail is closed before the next append, so the new record survives',
     // repaired record after it must be intact
     assert.doesNotThrow(() => JSON.parse(lines.at(-1)))
   })
+})
+
+test('the event file keeps a bounded newest suffix instead of growing forever', async () => {
+  await withStore(
+    async (store) => {
+      for (let index = 0; index < 60; index += 1)
+        await store.append({ t: 'skill', skill: `s${index}`, pad: 'x'.repeat(40) })
+      const raw = await readFile(store.file, 'utf8')
+      assert.ok(Buffer.byteLength(raw) <= 600, `file stayed bounded (got ${Buffer.byteLength(raw)} bytes)`)
+      assert.ok(raw.endsWith('\n'))
+      const records = await store.readAll()
+      assert.ok(records.length > 1 && records.length < 60)
+      assert.equal(records.at(-1).skill, 's59')
+      // the kept records are a contiguous newest suffix, oldest first
+      assert.deepEqual(
+        records.map((record) => record.skill),
+        Array.from({ length: records.length }, (_, index) => `s${60 - records.length + index}`),
+      )
+    },
+    { maxBytes: 600 },
+  )
+})
+
+test('a single record larger than the cap is still kept', async () => {
+  await withStore(
+    async (store) => {
+      await store.append({ t: 'skill', skill: 'huge', pad: 'x'.repeat(400) })
+      const records = await store.readAll()
+      assert.deepEqual(
+        records.map((record) => record.skill),
+        ['huge'],
+      )
+    },
+    { maxBytes: 80 },
+  )
+})
+
+test('the data directory is owner-only, including one created by an older version', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sev-store-mode-'))
+  try {
+    const existing = path.join(root, 'existing')
+    await mkdir(existing)
+    await chmod(existing, 0o755)
+    const store = new EventStore(existing)
+    await store.append({ t: 'skill', skill: 'a' })
+    assert.equal((await stat(existing)).mode & 0o777, 0o700)
+    const nested = path.join(root, 'nested', 'profile')
+    await new EventStore(nested).append({ t: 'skill', skill: 'b' })
+    assert.equal((await stat(nested)).mode & 0o777, 0o700)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('append failures are captured without breaking the queue', async () => {

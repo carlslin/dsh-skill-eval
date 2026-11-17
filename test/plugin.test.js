@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Config, apply, inject, name } from '../index.js'
@@ -880,5 +880,51 @@ test('the board and settings page answer in the requested language', async () =>
     assert.match(await call(pageRoute, { 'accept-language': 'zh-CN' }, '/skill-eval?lang=en'), /Skill execution report/)
     assert.match(await call(configRoute), /Skill eval · Config/)
     assert.match(await call(configRoute, { 'accept-language': 'zh-CN' }), /技能评测 · 配置/)
+  })
+})
+
+test('a failing report answers 500 without echoing the internal error', async () => {
+  await withDataDir(async (dataDir) => {
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, { enabled: true, dataDir })
+    // a directory where the event file should be makes the reader throw
+    await mkdir(`${dataDir}/events.jsonl`)
+    const route = registered.routes.find((item) => item.kind === 'exact' && item.path === '/skill-eval/data')
+    const { req, res } = fakeHttp('GET', '/skill-eval/data')
+    await route.handler(req, res)
+    assert.equal(res.statusCode, 500)
+    assert.equal(res.body, 'skill-eval data failed')
+    assert.doesNotMatch(res.body, /EISDIR|events\.jsonl/)
+  })
+})
+
+test('the dev view reports saved settings that were rejected', async () => {
+  await withDataDir(async (dataDir) => {
+    await writeFile(`${dataDir}/settings.json`, JSON.stringify({ windowTtlMs: '30m', minSamples: 5 }))
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, { enabled: true, dataDir })
+    const tool = registered.tools.find((item) => item.name === 'skill_eval_report')
+    const dev = JSON.parse(await tool.execute({ view: 'dev', format: 'json' }, {}))
+    assert.equal(dev.settingsKeys, 1)
+    assert.equal(dev.settingsErrors, 1)
+    assert.ok(dev.findings.some((item) => item.code === 'settings-invalid'))
+  })
+})
+
+test('saved settings.json values are normalized before they are applied', async () => {
+  await withDataDir(async (dataDir) => {
+    await import('node:fs/promises').then((fs) =>
+      fs.writeFile(`${dataDir}/settings.json`, JSON.stringify({ windowTtlMs: '30m', minSamples: 5 })),
+    )
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, { enabled: true, dataDir, windowTtlMs: 30 * 60_000 })
+    const route = registered.routes.find((item) => item.kind === 'exact' && item.path === '/skill-eval/settings')
+    const { req, res, flush } = fakeHttp('GET', '/skill-eval/settings')
+    const pending = route.handler(req, res)
+    flush()
+    await pending
+    const payload = JSON.parse(res.body)
+    assert.equal(payload.values.minSamples, 5)
+    assert.equal(payload.values.windowTtlMs, 30 * 60_000)
   })
 })

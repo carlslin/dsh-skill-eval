@@ -778,3 +778,21 @@ test('records one per-step telemetry row with calls, errors, skills and tokens',
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('a turn with no skill window still closes its last step at turn end', async () => {
+  const { dir, store } = await tempStore()
+  const ctx = fakeCtx()
+  const recorder = createRecorder(ctx, { windowToolCalls: 12 }, { store })
+  try {
+    ctx.emit('agent/pre-step', { agent, turn: 1, step: 1 }, () => 'next')
+    toolResult(ctx, 'read', { path: '/tmp/a' })
+    ctx.emit('agent/turn-stopping', { agent, turn: 1 })
+    const steps = (await settle(store)).filter((record) => record.t === 'step')
+    assert.equal(steps.length, 1)
+    assert.equal(steps[0].closeReason, 'turn-end')
+    assert.equal(steps[0].toolCalls, 1)
+  } finally {
+    await recorder.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
