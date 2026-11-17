@@ -1,5 +1,6 @@
 # dsh-skill-eval
 
+[![npm](https://img.shields.io/npm/v/dsh-skill-eval)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![latest release](https://img.shields.io/github/v/release/carlslin/dsh-skill-eval?display_name=tag)](https://github.com/carlslin/dsh-skill-eval/releases)
 
@@ -87,6 +88,12 @@ dsh-skill-eval-verify   # product surfaces (9 checks, after a reload)
 
 Requirements: DeepSeek Harness with plugin bundles (the package declares
 `dsh.engines.dsh >= 0.2.0`) and Node.js ≥ 20 for the CLI helpers.
+
+From npm:
+
+```bash
+dsh plugin --profile desktop add dsh-skill-eval
+```
 
 From GitHub source:
 

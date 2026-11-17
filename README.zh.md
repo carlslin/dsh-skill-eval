@@ -1,5 +1,6 @@
 # dsh-skill-eval（技能评测）
 
+[![npm](https://img.shields.io/npm/v/dsh-skill-eval)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![latest release](https://img.shields.io/github/v/release/carlslin/dsh-skill-eval?display_name=tag)](https://github.com/carlslin/dsh-skill-eval/releases)
 
@@ -75,6 +76,12 @@ dsh-skill-eval-verify   # 产品面可达（9 项，重载后）
 
 要求：带插件 bundle 能力的 DeepSeek Harness（包内声明 `dsh.engines.dsh >= 0.2.0`），
 CLI 辅助脚本需要 Node.js ≥ 20。
+
+从 npm 安装：
+
+```bash
+dsh plugin --profile desktop add dsh-skill-eval
+```
 
 从 GitHub 源码安装：
 
