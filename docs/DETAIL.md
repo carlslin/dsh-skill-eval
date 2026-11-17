@@ -32,8 +32,9 @@ cap ahead of the suffix, so the review ledger survives — and the trimmed file 
 at most half the cap, so a long-lived profile cannot grow without bound (a
 single record larger than the cap is still kept). Appends serialize across
 processes through `events.jsonl.lock`, a lock file treated as a crash leftover
-once it is 10 s stale, and every temp file is recreated `0600` before it is
-renamed into place. Telemetry contains user message excerpts, so a new data
+once it is 10 s stale; exactly one waiter renames a dead lock away before it is
+recreated, so a crash cannot hand out two owners, and every temp file is
+recreated `0600` before it is renamed into place. Telemetry contains user message excerpts, so a new data
 directory is created `0700` and every file inside it `0600`; an existing
 directory keeps whatever mode the user gave it.
 

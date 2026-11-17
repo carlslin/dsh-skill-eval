@@ -2,7 +2,7 @@
 
 ## 1. 代码与文案
 
-- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**279 tests**）
+- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**280 tests**）
 - [ ] `npm run build:pack` 产出 tarball 并通过 `doctor --release`
 - [ ] `package.json` version 与 `client.js` 的 `DATA_VERSION` 一致（doctor 检查）
 - [ ] CHANGELOG 有本次版本条目

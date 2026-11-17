@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.20.5 — atomic stale-lock takeover
+
+- **A stale `events.jsonl.lock` is taken over atomically.** A waiter renames the
+  dead lock away before recreating it, so two processes that both saw the same
+  crash leftover can no longer delete the winner's fresh lock and write
+  concurrently. The 10 s stale threshold and the 15 s acquisition timeout are
+  unchanged.
+- Tests: **280 passing** (`npm test`).
+
 ## 1.20.4 — review fixes and hardening
 
 - **Existing data directories are never re-chmodded.** `ensurePrivateDir` only

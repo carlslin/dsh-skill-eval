@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { EventStore } from '../lib/store.js'
@@ -152,6 +152,27 @@ test('a stale lock file is cleared instead of blocking appends', async () => {
     assert.equal((await store.readAll()).at(-1).skill, 'a')
     await assert.rejects(stat(lock))
   })
+})
+
+test('a stale lock is taken over atomically, so a waiter cannot delete a fresh lock', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'sev-store-steal-'))
+  try {
+    const a = new EventStore(dir)
+    const b = new EventStore(dir)
+    const lock = `${a.file}.lock`
+    await appendFile(lock, 'x', 'utf8')
+    const past = new Date(Date.now() - 60_000)
+    await utimes(lock, past, past)
+    // both stores see the same dead lock; exactly one may rename it away
+    await Promise.all([a.append({ store: 'a' }), b.append({ store: 'b' })])
+    const records = await a.readAll()
+    assert.equal(records.length, 2)
+    await assert.rejects(stat(lock))
+    const leftovers = (await readdir(dir)).filter((name) => name.includes('.stale.'))
+    assert.deepEqual(leftovers, [])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('a held lock delays an append until it is released', async () => {

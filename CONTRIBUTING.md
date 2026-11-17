@@ -6,7 +6,7 @@ Thanks for taking the time to improve `dsh-skill-eval`.
 
 ```bash
 pnpm install            # devDependencies only; runtime has no dependencies besides the DSH peer
-node --test test/       # 279 tests
+node --test test/       # 280 tests
 ```
 
 `npm test` runs `pretest` first, which rebuilds the browser bundle from

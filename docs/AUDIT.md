@@ -89,3 +89,8 @@ the fixes have regression tests (`test/audit-regressions.test.js`, `test/store.t
 - **追加写入跨进程互斥**：`events.jsonl.lock` 包裹"修尾-轮换-追加"临界区（10 s 未动的锁视为崩溃残留），共享同一数据目录的两个宿主不再因 rename 覆盖而丢记录。
 - **被拒绝的已保存设置可见**：`view:"dev"` 输出 `settingsErrors` 与 `settings-invalid` finding，不再把非法键算作已生效。
 - 测试：279 项全绿。
+
+## 1.20.5 加固（Hardening）
+
+- **陈旧锁原子接管**：崩溃残留的 `events.jsonl.lock` 由等待者用原子 rename 抢走后再重建；两个同时看到陈旧锁的进程不会互相删掉新锁并同时写入。10 秒陈旧阈值与 15 秒获取超时不变。
+- 测试：280 项全绿。

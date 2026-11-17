@@ -2,7 +2,7 @@
 // Keep in sync with package.json `version` (a test enforces it). The host
 // registers this exact path per release, so a plugin that was hot-reloaded
 // without reclaiming the canonical route still answers here.
-const DATA_VERSION = '1.20.4'
+const DATA_VERSION = '1.20.5'
 const DATA_URL = '/skill-eval/data/' + DATA_VERSION
 const DATA_URL_FALLBACK = '/skill-eval/data'
 const SETTINGS_URL = '/skill-eval/settings/' + DATA_VERSION
