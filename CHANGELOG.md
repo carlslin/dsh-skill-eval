@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.21.0 — TypeScript sources + per-issue copy
+
+- **The whole codebase is TypeScript (strict).** Sources moved to `src/`
+  (`src/index.ts` host entry, `src/lib/*`, `src/scripts/*.mts` CLIs,
+  `src/client/*.ts` browser snippets, `test/*.ts`). `npm run compile` emits the
+  same runtime paths the package always shipped (`index.js`, `lib/*.js`,
+  `scripts/*.mjs`, `client.js`) — the tarball contents are unchanged.
+  `npm run typecheck` runs strict `tsc` over the host, client and test
+  projects; eslint now covers `.ts`/`.mts` via typescript-eslint.
+- **A git clone is not an installable plugin.** Runtime files are build output
+  and are not in the checkout. Install from source with `npm install`, `npm pack`,
+  then `dsh plugin add` of that tarball. Tests import `src/`, so the suite runs
+  the TypeScript you edit. `npm run build:client` compiles before it writes
+  `client.js`. The published tarball omits `scripts/build-client.mjs`, which
+  imports the `typescript` devDependency.
+- **Every issue can be copied on its own.** Each skill advice row and each MCP
+  server/tool finding has its own "复制修复指令 / Copy fix" button that writes a
+  self-contained Markdown repair task (title, evidence, concrete fix) — no more
+  copying the whole report to hand a single problem to an agent. Clipboard API
+  first, `execCommand` fallback preserved.
+- **`npm test` works on Node 22.18 and 24 again.** The suite command uses an
+  explicit `test/**/*.test.ts` glob because Node 22/24 treat a bare directory
+  argument as an entry module; `release:check` and `scripts/build.mts` share it.
+- **A fresh profile no longer fails acceptance.** `accept` skips telemetry,
+  snapshot markdown and snapshot JSON until the first skill load, and only
+  prints the stale-generation hint for generation-shape failures; `verify`
+  skips per-turn boards and the latest snapshot until data exists. The
+  clean-profile release smoke can now pass without data.
+- Tests: **286 passing** (`npm test`).
+
 ## 1.20.5 — atomic stale-lock takeover
 
 - **A stale `events.jsonl.lock` is taken over atomically.** A waiter renames the

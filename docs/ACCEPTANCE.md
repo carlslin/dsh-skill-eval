@@ -1,5 +1,10 @@
 # Acceptance report — dsh-skill-eval 1.20.0
 
+> **Historical snapshot — 1.20.0.** The current 1.20.5 + TypeScript release
+> passes **286 tests**, ships a 48-file tarball, and reports empty telemetry,
+> snapshots and turn boards as **SKIP** on a fresh profile instead of failing. The numbers
+> and file names below record the 1.20.0 acceptance run.
+
 Status snapshot for the objective: _skill debugging, MCP debugging, dedicated
 boards, developer-mode integration, per-run boards and scores, a scientific
 scoring model, a user-adjustable standard, and a publishable release._

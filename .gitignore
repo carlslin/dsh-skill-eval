@@ -7,3 +7,10 @@ dist/
 .env
 
 .codegraph/
+
+# build output (npm run compile): sources live in src/
+/index.js
+/index.d.ts
+/lib/
+/scripts/
+/client.js

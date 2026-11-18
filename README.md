@@ -97,11 +97,17 @@ From npm:
 dsh plugin --profile desktop add dsh-skill-eval
 ```
 
-From GitHub source:
+From GitHub source. A clone contains `src/` only. `index.js`, `lib/`, `scripts/`
+and `client.js` are build output, and the host loads those files. Pack the
+compiled tree and install the tarball. Do not point `dsh plugin add` or
+`plugin_manager` → `install_bundle` at the git checkout.
 
 ```bash
 git clone https://github.com/carlslin/dsh-skill-eval.git
-dsh plugin --profile desktop add "$PWD/dsh-skill-eval"
+cd dsh-skill-eval
+npm install          # prepare compiles the runtime files
+npm pack             # tarball of those files, not the git tree
+dsh plugin --profile desktop add "$PWD"/dsh-skill-eval-*.tgz
 ```
 
 From a packed release tarball (what a published build ships):
@@ -110,10 +116,9 @@ From a packed release tarball (what a published build ships):
 dsh plugin --profile desktop add "$PWD/dist/dsh-skill-eval-<version>.tgz"
 ```
 
-Or straight from the source directory, or through the agent's
-`plugin_manager` → `install_bundle`. The package ships the prebuilt browser
-bundle, so installation needs no build step; editing `client/*.js` requires
-`npm run build:client` (a zero-dependency concatenation script). After install,
+The npm package and the release tarball are prebuilt. A git checkout is not.
+Editing `src/client/*.ts` requires `npm run build:client`, which uses the
+`typescript` devDependency to strip types and write `client.js`. After install,
 refresh the GUI: the board is the **Skill eval** panel icon in the sidebar,
 settings live under **Settings → Plugins → `dsh-skill-eval`**.
 
@@ -165,11 +170,14 @@ the matching `dist/` artifact.
 
 ## Build
 
-Editing `client/*.js` requires rebuilding the single-file browser bundle:
+Editing `src/client/*.ts` requires rebuilding the single-file browser bundle:
 
 ```bash
-npm run build          # format check → lint → client build → doctor → 280 tests
-npm run build:fast     # client build + doctor only
+npm run compile        # tsc → emitted index.js/lib/*.js/scripts/*.mjs + client.js
+npm run build:client   # same emit; works when scripts/ is not already built
+npm run typecheck      # strict tsc for host, client and test projects
+npm run build          # format check → lint → compile → doctor → the test suite
+npm run build:fast     # compile + doctor only
 npm run build:pack     # full build + dist/dsh-skill-eval-<version>.tgz
 npm run build:install  # pack + install into the desktop profile
 ```
@@ -180,10 +188,14 @@ npm run build:install  # pack + install into the desktop profile
 ## Tests
 
 ```
-node --test test/
+npm test
 ```
 
-280 tests (`npm test` rebuilds the browser bundle first): scoring bands, static checks, correction detection,
+`npm test` compiles first, then runs the suite against `src/` (not a previous
+`lib/*.js`). The suite command is
+`node --experimental-strip-types --test "test/**/*.test.ts"`; the explicit
+glob is required because Node 22/24 treat a bare directory argument as an entry
+module. Scoring bands, static checks, correction detection,
 window lifecycle (turn-end snapshot → correction → close), store round-trip with
 a torn line, analyzer join, markdown/HTML rendering incl. escaping and bilingual
 advice copy, host route registration under duplicate-route pressure, and the

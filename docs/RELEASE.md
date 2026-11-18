@@ -2,7 +2,7 @@
 
 ## 1. 代码与文案
 
-- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**280 tests**）
+- [ ] `npm run build` 全绿（format check、lint、client build、doctor、**286 tests**）
 - [ ] `npm run build:pack` 产出 tarball 并通过 `doctor --release`
 - [ ] `package.json` version 与 `client.js` 的 `DATA_VERSION` 一致（doctor 检查）
 - [ ] CHANGELOG 有本次版本条目
@@ -30,12 +30,17 @@ npm publish --dry-run 2>&1 | tail -20   # confirm no bin warnings and note files
 
 ```bash
 dsh plugin --profile sevsmoke add "$PWD/dist/dsh-skill-eval-<version>.tgz"
-# 启动该 profile 的 web 宿主，拿到端口后：
+# 启动该 profile 的 web 宿主；端口 0 让系统分配，日志里会打印实际 URL：
+dsh --profile sevsmoke --port 0 --no-open
 node scripts/accept.mjs http://127.0.0.1:<port>
 node scripts/verify-live.mjs http://127.0.0.1:<port>
 # 清理
 dsh plugin --profile sevsmoke remove dsh-skill-eval
 ```
+
+- [ ] 全新的数据目录里，`telemetry-file`、两个 `snapshot-*` 与 `turn-boards`、
+      `latest-snapshot` 显示 **SKIP**（还没加载过技能），不算失败；加载一次技能后重跑，
+      这些项应变为 PASS。
 
 ## 5. 已知遗留（不阻塞发布）
 

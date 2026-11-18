@@ -48,7 +48,7 @@ curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
 之后每次改完源码：
 
 ```bash
-touch index.js lib/*.js client.js        # 或任何真实改动
+npm run compile && touch index.js lib/*.js client.js   # 先编译 src/，再做任何真实改动
 sleep 3                                  # HMR 默认 debounce + awaitWriteFinish
 curl -s -o /dev/null -w '%{content_type}\n' \
   http://127.0.0.1:<port>/skill-eval/data/<新版本>
@@ -56,8 +56,8 @@ curl -s -o /dev/null -w '%{content_type}\n' \
 ```
 
 实测：1.15.2 → 1.15.3 → 1.15.4 都靠 HMR 完成，没有重启；客户端半个由
-client HMR receiver 替换已构建的 bundle（改的是 `client/*.js`，先
-`node scripts/build-client.mjs` 再 `touch client.js`；未替换时刷新一次页面）。
+client HMR receiver 替换已构建的 bundle（改的是 `src/client/*.ts`，先
+`npm run build:client` 再 `touch client.js`；未替换时刷新一次页面）。
 
 注意两点：
 
@@ -70,14 +70,14 @@ client HMR receiver 替换已构建的 bundle（改的是 `client/*.js`，先
 
 ## 什么时候必须重启
 
-| 改了什么                                | 生效方式                                                                   |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| `index.js` / `lib/*`（host 半）         | 正常情况：重启；极少数情况下 disable/enable 会重新 import，不要依赖        |
-| `client/*.js`（client 源）              | `node scripts/build-client.mjs` → `touch client.js`，HMR 替换已构建 bundle |
-| `client.js`（生成产物）                 | 不要手改；由 `client/*.js` 构建，doctor 检查两者一致                       |
-| `package.json` 版本号                   | 重启（版本化路由前缀由模块加载时的版本决定）                               |
-| 数据文件（events.jsonl、settings.json） | 立即（每次请求重新读）                                                     |
-| 由 `settings.json` 覆盖的配置           | 立即（保存即改内存中的 cfg）                                               |
+| 改了什么                                | 生效方式                                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts` / `src/lib/*`（host 源） | `npm run compile` 生成 `index.js`/`lib/*.js`；正常情况：重启；极少数情况下 disable/enable 会重新 import，不要依赖 |
+| `src/client/*.ts`（client 源）          | `npm run build:client` → `touch client.js`，HMR 替换已构建 bundle                                                 |
+| `client.js`（生成产物）                 | 不要手改；由 `src/client/*.ts` 构建，doctor 检查两者一致                                                          |
+| `package.json` 版本号                   | 重启（版本化路由前缀由模块加载时的版本决定）                                                                      |
+| 数据文件（events.jsonl、settings.json） | 立即（每次请求重新读）                                                                                            |
+| 由 `settings.json` 覆盖的配置           | 立即（保存即改内存中的 cfg）                                                                                      |
 
 ## 给调试用的开关
 

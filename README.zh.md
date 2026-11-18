@@ -84,11 +84,16 @@ CLI 辅助脚本需要 Node.js ≥ 20。
 dsh plugin --profile desktop add dsh-skill-eval
 ```
 
-从 GitHub 源码安装：
+从 GitHub 源码安装。克隆下来只有 `src/`。`index.js`、`lib/`、`scripts/`、
+`client.js` 都是构建产物，宿主加载的是这些文件。先打包再安装 tarball。不要把
+`dsh plugin add` 或 `plugin_manager` → `install_bundle` 指到 git 检出目录。
 
 ```bash
 git clone https://github.com/carlslin/dsh-skill-eval.git
-dsh plugin --profile desktop add "$PWD/dsh-skill-eval"
+cd dsh-skill-eval
+npm install          # prepare 会编译出运行时文件
+npm pack             # 打的是这些文件，不是 git 树
+dsh plugin --profile desktop add "$PWD"/dsh-skill-eval-*.tgz
 ```
 
 从发布 tarball 安装（发布产物）：
@@ -97,9 +102,9 @@ dsh plugin --profile desktop add "$PWD/dsh-skill-eval"
 dsh plugin --profile desktop add "$PWD/dist/dsh-skill-eval-<版本>.tgz"
 ```
 
-也可以直接从源码目录安装，或让 agent 调用 `plugin_manager` → `install_bundle`。
-发布包内含预构建的客户端 bundle，安装无需构建；修改 `client/*.js` 后要跑
-`npm run build:client`（零依赖的拼接脚本）。装完刷新 GUI：看板是侧边栏的
+npm 包和发布 tarball 是预构建的。git 检出目录不是。修改 `src/client/*.ts` 后要跑
+`npm run build:client`，它用 `typescript` 这个 devDependency 去掉类型并写出
+`client.js`。装完刷新 GUI：看板是侧边栏的
 「技能评测」面板，配置在 **设置 → 插件 → `dsh-skill-eval`**。
 
 ## 用法
@@ -137,10 +142,12 @@ registerReviewTool: true # skill_eval_review：泄漏审查 + 审计账本
 ## 测试
 
 ```
-node --test test/
+npm test
 ```
 
-280 项（`npm test` 会先重建客户端 bundle）：评分分档、静态检查、纠正识别、窗口生命周期（回合结束快照 →
+`npm test` 会先编译，再对着 `src/` 跑套件（不是上一份 `lib/*.js`）。测试命令是
+`node --experimental-strip-types --test "test/**/*.test.ts"`；Node 22/24 会把裸目录当成
+入口模块，必须显式 glob。评分分档、静态检查、纠正识别、窗口生命周期（回合结束快照 →
 纠正 → 关闭）、带残缺行的存储往返、分析器 join、Markdown/HTML 渲染（含转义与中文
 建议文案）、重复路由压力下的宿主路由注册，以及客户端的 jsdom 挂载测试。
 
