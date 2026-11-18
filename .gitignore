@@ -8,6 +8,11 @@ dist/
 
 .codegraph/
 
+# local authoring artifacts (seecode diagrams; npm uses pnpm-lock here)
+.seecode/
+diagrams/
+package-lock.json
+
 # build output (npm run compile): sources live in src/
 /index.js
 /index.d.ts
