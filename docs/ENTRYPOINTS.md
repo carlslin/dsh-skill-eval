@@ -19,6 +19,10 @@ Three everyday entry points; everything else is for agents, terminals or debuggi
 | 网页配置页（与设置页同源） · Web settings | `…/skill-eval/config`                                                               |
 | JSON 数据 · JSON report                   | `…/skill-eval/data/<version>`                                                       |
 
+看板技能卡头部可直接「复制问题」，把该技能当前的评分、维度、证据与待修问题复制成一段可交给 agent 的修复任务。
+
+Each skills-board card has a **Copy issues** button in its header: it copies the card's score, dimensions, evidence and current issues as one Markdown repair task for an agent.
+
 端口每次启动会变；`dsh-skill-eval-verify` 会自动发现。Port changes per launch; the verify script discovers it.
 
 看板与设置页支持中英双语：按浏览器 `Accept-Language` 自动选择，也可用 `?lang=zh|en` 强转；页面右上角有切换链接。建议正文（advice）目前仍是引擎输出的英文。

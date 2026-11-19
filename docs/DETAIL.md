@@ -149,6 +149,11 @@ against the skill file. Rules:
   (`window.__SEV_ENABLE_POPUP__ = true`) additionally registers
   `sidebar.footer.action` + `shell.overlay`. All surfaces read the same host
   route, so the tool, the board and the popup show the same numbers.
+- **Per-skill handoff** (skills board): every card header has `复制问题 / Copy
+issues` next to 查看轨迹. It copies the card's current budget-limited advice,
+  score/CI, dimensions and sample evidence as one Markdown repair task; the
+  individual advice rows keep their own `复制此问题` buttons. It uses the
+  clipboard API with an `execCommand` fallback and needs no new host route.
 - `skill_eval_report` tool — `{skill?, format?: 'markdown'|'json'}`. Registered
   so the agent can read its own numbers and cite them; a system-prompt section
   tells it to.

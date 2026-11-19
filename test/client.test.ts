@@ -599,6 +599,70 @@ test('each skill and MCP issue copies on its own as a markdown fix task', async 
   assert.match(copied[1], /- 修复建议: Check the server process\./)
 })
 
+test('a skill card copies its whole visible issue set as one markdown task', async () => {
+  const { window, registrations, React } = await mountClient()
+  const Panel = registrations.find((item) => item.registration.name === 'main').Component
+  const copied: string[] = []
+  window.document.execCommand = (command: string) => {
+    if (command === 'copy') copied.push(window.document.querySelector('textarea')?.value ?? '')
+    return true
+  }
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(Panel))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const card = host.querySelector('.sev-card')
+  assert.ok(card, 'a skill card renders')
+  const name = card.querySelector('.sev-name')?.textContent ?? ''
+  const button = card.querySelector('.sev-skill-copy')
+  assert.ok(button, 'the card header exposes a per-skill copy button')
+  assert.ok(button.closest('.sev-card-head'), 'the button sits in the card header next to 查看轨迹')
+  assert.match(button.getAttribute('aria-label') ?? '', new RegExp(name))
+  await act(async () => {
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  assert.equal(copied.length, 1)
+  const text = copied[0]
+  assert.match(text, /^## 修复技能 /)
+  assert.equal(text.includes('`' + name + '`'), true)
+  assert.match(text, /- 评分: /)
+  assert.match(text, /- 维度: /)
+  assert.match(text, /- 证据: /)
+  assert.match(text, /### 待修问题/)
+  assert.match(text, /- 规则: `user-corrections`/)
+  assert.doesNotMatch(text, /caveman-help/, 'one skill only, not the whole report')
+  assert.match(button.textContent ?? '', /已复制/)
+})
+
+test('a skill card with no issues still copies a useful evidence task', async () => {
+  const empty = REPORT.skills.map((skill) => ({ ...skill, advice: [], topAdvice: [] }))
+  const { window, registrations, React } = await mountClient({ report: { ...REPORT, skills: empty } })
+  const Panel = registrations.find((item) => item.registration.name === 'main').Component
+  const copied: string[] = []
+  window.document.execCommand = (command: string) => {
+    if (command === 'copy') copied.push(window.document.querySelector('textarea')?.value ?? '')
+    return true
+  }
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(Panel))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const button = host.querySelector('.sev-skill-copy')
+  assert.ok(button)
+  await act(async () => {
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  assert.equal(copied.length, 1)
+  assert.match(copied[0], /### 待修问题/)
+  assert.match(copied[0], /没有需要修的问题/)
+})
+
 test('the config button opens the in-panel settings instead of window.open', async () => {
   const { window, registrations, React } = await mountClient()
   const Panel = registrations.find((item) => item.registration.name === 'main').Component

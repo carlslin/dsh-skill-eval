@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.23.0 — per-skill issue handoff
+
+- **Copy a whole skill's issues from its card.** Every skills-board card now
+  shows a `复制问题 / Copy issues` button in the header, next to 查看轨迹. It
+  copies that card's current budget-limited advice, score/grade/95% CI,
+  dimension scores and sample evidence as one self-contained Markdown repair
+  task; each advice row keeps its own `复制此问题` button. The existing
+  clipboard API + `execCommand` fallback is reused, so it works in the desktop
+  shell and on plain HTTP.
+- Client regression tests cover the skill-level payload, the header placement
+  and the no-issue case.
+- Tests: **327 passing** (`npm test`).
+
 ## 1.22.0 — structural review fixes
 
 - **Entry split into leaf modules.** `src/index.ts` keeps only `Config` + `apply`

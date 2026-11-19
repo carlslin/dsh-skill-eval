@@ -366,6 +366,7 @@ const SkillCard = memo(function SkillCard(props: {
       h(TrendSparkline, { trend: skill.trend, t }),
       h('div', { className: 'sev-grade', style: { color: scoreColor(score.total) } }, score.grade || '?'),
       h('div', { className: 'sev-total', style: { color: scoreColor(score.total) } }, fmt(score.total)),
+      h(CopySkillIssuesButton, { skill, t, lang }),
       h(
         'button',
         {

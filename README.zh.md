@@ -1,8 +1,8 @@
 # dsh-skill-eval（技能评测）
 
-[![npm](https://img.shields.io/badge/npm-v1.22.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.23.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.22.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.23.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 记录 **skill 加载之后**真实发生了什么：加载成败、后续工具报错、用户有没有推翻、
 技能是否被忽略、是否与兄弟技能碰撞、花了多少 token。每个技能打 0–100 分，并把
@@ -110,7 +110,7 @@ npm 包和发布 tarball 是预构建的。git 检出目录不是。修改 `src/
 ## 用法
 
 - **结果条**：完成回合下方，分数、调用/报错、下一处修复、改动记录（零 token）。
-- **看板**：技能 / 轨迹 / 运行 / MCP / 开发者标签，含下一步、效度摘要与 SVG 图表；「轨迹」逐步打分并对比最近几个回合。
+- **看板**：技能 / 轨迹 / 运行 / MCP / 开发者标签，含下一步、效度摘要与 SVG 图表；「轨迹」逐步打分并对比最近几个回合。每张技能卡在「查看轨迹」旁有「复制问题」，可把该卡当前的问题、评分、维度与证据复制成一段独立的 Markdown 修复任务；每条建议仍可单独复制。
 - **让 agent 看**：直接问「`pdf-tools` 表现怎么样」—— agent 会调 `skill_eval_report`；
   改技能前它被告知先调 `skill_eval_review` 做泄漏审查。
 - **对话命令**：`/skill-eval`、`/skill-eval <技能>`、`loop [all]`、`validity`、

@@ -1,8 +1,8 @@
 # dsh-skill-eval
 
-[![npm](https://img.shields.io/badge/npm-v1.22.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.23.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.22.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.23.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 Records what happens **after** a skill is loaded, scores every skill 0–100, and
 turns the evidence into fixes the agent can act on. It is a DeepSeek Harness
@@ -126,7 +126,7 @@ settings live under **Settings → Plugins → `dsh-skill-eval`**.
 
 - **Result strip** under every completed turn: score chip, calls/errors, next
   fix and edit history (zero tokens).
-- **Board**: skills / steps / runs / MCP / dev tabs with next steps and evidence validity, plus SVG charts (score distribution, skill trend sparkline, evidence coverage, MCP p50/p95, session activity). The **steps** tab scores every loop step and compares recent turns.
+- **Board**: skills / steps / runs / MCP / dev tabs with next steps and evidence validity, plus SVG charts (score distribution, skill trend sparkline, evidence coverage, MCP p50/p95, session activity). The **steps** tab scores every loop step and compares recent turns. Each skill card has a **Copy issues** button next to 查看轨迹 that copies the card's current issues, score, dimensions and evidence as one self-contained Markdown repair task; each advice row keeps its own copy button.
 - **Agent**: ask "how did `pdf-tools` perform?" — the agent calls
   `skill_eval_report`; before editing a skill it is told to call
   `skill_eval_review` first.

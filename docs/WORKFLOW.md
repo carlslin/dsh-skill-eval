@@ -48,23 +48,24 @@
 
 ## 什么时候看什么
 
-| 场景               | 入口                                                                          | 期望看到                                           |
-| ------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------- |
-| 刚加载完技能       | 对话结果条                                                                    | 分数/等级 + 本回合调用与报错 + 「下一步 · 可改」   |
-| 想知道该修哪个     | `/skill-eval loop all`                                                        | 按 priority 排序的计划列表，含收益/成本依据        |
-| 只盯一个技能       | `/skill-eval pdf-tools`                                                       | 4 维分数、CI、建议全文                             |
-| 准备改技能         | `skill_eval_review {skill, dimension, hypothesis, diff}`                      | `accept` / `warn` / `reject` + 原因                |
-| 多次改动后         | `/skill-eval`                                                                 | 排行 + 是否显著；`adviceBudget` 随接受的编辑数退火 |
-| 它是不是在变差     | `/skill-eval history <skill>`                                                 | 逐次加载 + 前后半段趋势                            |
-| 看某一次执行的结论 | `/skill-eval turns`，或打开 `reports/turns/<session>-t<N>.md`                 | 那一次执行专属的快照                               |
-| 上次改动有用吗     | `/skill-eval impact <skill>`                                                  | 每条编辑前后错误率与判定                           |
-| 技能长期低分       | 报告里的 `prune-candidate`                                                    | 删掉或并进真正在用的技能                           |
-| 想知道证据够不够   | `/skill-eval validity`                                                        | 覆盖数、区间数、以及明确的「还不能说」清单         |
-| 怀疑服务/工具      | `/skill-eval mcp`                                                             | 每服务器健康/错误率/p50/p95/失败工具               |
-| 想看整体汇报       | 侧边栏面板图标「技能评测」→ 主面板（或浏览器打开 `/skill-eval/board/<版本>`） | 技能/运行/MCP/开发者标签，含下一步与效度           |
-| 想改评分标准       | 设置 → 插件 → `dsh-skill-eval` 包页面 → 配置                                  | 权重/阈值/预算/开关，保存即生效                    |
-| 入口速查           | [ENTRYPOINTS.md](ENTRYPOINTS.md)                                              | 三个日常入口 + 网页/命令/终端                      |
-| 发版前自检         | `dsh-skill-eval-doctor` + `accept` + `verify`                                 | 19 / 17 / 7+2 项：打包、代次、产品面               |
+| 场景                   | 入口                                                                          | 期望看到                                               |
+| ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 刚加载完技能           | 对话结果条                                                                    | 分数/等级 + 本回合调用与报错 + 「下一步 · 可改」       |
+| 想知道该修哪个         | `/skill-eval loop all`                                                        | 按 priority 排序的计划列表，含收益/成本依据            |
+| 只盯一个技能           | `/skill-eval pdf-tools`                                                       | 4 维分数、CI、建议全文                                 |
+| 把某技能交给修复 agent | 技能卡头部「复制问题」                                                        | 该技能评分/维度/证据 + 当前问题，一段可粘贴的 Markdown |
+| 准备改技能             | `skill_eval_review {skill, dimension, hypothesis, diff}`                      | `accept` / `warn` / `reject` + 原因                    |
+| 多次改动后             | `/skill-eval`                                                                 | 排行 + 是否显著；`adviceBudget` 随接受的编辑数退火     |
+| 它是不是在变差         | `/skill-eval history <skill>`                                                 | 逐次加载 + 前后半段趋势                                |
+| 看某一次执行的结论     | `/skill-eval turns`，或打开 `reports/turns/<session>-t<N>.md`                 | 那一次执行专属的快照                                   |
+| 上次改动有用吗         | `/skill-eval impact <skill>`                                                  | 每条编辑前后错误率与判定                               |
+| 技能长期低分           | 报告里的 `prune-candidate`                                                    | 删掉或并进真正在用的技能                               |
+| 想知道证据够不够       | `/skill-eval validity`                                                        | 覆盖数、区间数、以及明确的「还不能说」清单             |
+| 怀疑服务/工具          | `/skill-eval mcp`                                                             | 每服务器健康/错误率/p50/p95/失败工具                   |
+| 想看整体汇报           | 侧边栏面板图标「技能评测」→ 主面板（或浏览器打开 `/skill-eval/board/<版本>`） | 技能/运行/MCP/开发者标签，含下一步与效度               |
+| 想改评分标准           | 设置 → 插件 → `dsh-skill-eval` 包页面 → 配置                                  | 权重/阈值/预算/开关，保存即生效                        |
+| 入口速查               | [ENTRYPOINTS.md](ENTRYPOINTS.md)                                              | 三个日常入口 + 网页/命令/终端                          |
+| 发版前自检             | `dsh-skill-eval-doctor` + `accept` + `verify`                                 | 19 / 17 / 7+2 项：打包、代次、产品面                   |
 
 ## 判定规则（避免自欺）
 
