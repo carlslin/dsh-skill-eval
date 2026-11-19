@@ -7,6 +7,7 @@
  */
 
 import { bootstrapCallRate, bootstrapRate } from './score.ts'
+import { escapeMdInline } from './html.ts'
 import type { Stats } from './score.ts'
 import type { Advice, Interval, Severity, WindowRecord } from './types.ts'
 
@@ -208,6 +209,15 @@ function gated(
 ): Gate {
   // No window-level evidence: keep the historical behaviour (report the mean).
   if (!Array.isArray(windows) || windows.length === 0) return { level: 'strong', ci: null }
+  // Small-n bootstrap intervals are overconfident (n=2 all-hits yields
+  // [1,1] instead of the true [0.16,1.0]): compute the interval normally but
+  // cap the verdict at weak so small samples can never report strong/critical.
+  if (Array.isArray(windows) && windows.length > 0 && windows.length < 8) {
+    const ci = bootstrapRate(windows, isHit, { resamples, seed: 17 })
+    if (!ci) return { level: 'mean', ci: null }
+    if (ci.mean <= threshold) return { level: 'none', ci }
+    return { level: 'weak', ci }
+  }
   const ci = bootstrapRate(windows, isHit, { resamples, seed: 17 })
   if (!ci) return { level: 'mean', ci: null }
   if (ci.low > threshold) return { level: 'strong', ci }
@@ -217,6 +227,12 @@ function gated(
 
 function gatedCalls(windows: WindowRecord[] | null | undefined, threshold: number, resamples: number): Gate {
   if (!Array.isArray(windows) || windows.length === 0) return { level: 'strong', ci: null }
+  if (windows.length < 8) {
+    const ci = bootstrapCallRate(windows, { resamples, seed: 17 })
+    if (!ci) return { level: 'mean', ci: null }
+    if (ci.mean <= threshold) return { level: 'none', ci }
+    return { level: 'weak', ci }
+  }
   const ci = bootstrapCallRate(windows, { resamples, seed: 17 })
   if (!ci) return { level: 'mean', ci: null }
   if (ci.low > threshold) return { level: 'strong', ci }
@@ -269,6 +285,7 @@ export function buildAdvice({
       title: 'Skill load fails at runtime',
       evidence: `${stats.loads - stats.loadOk}/${stats.loads} loads returned an error: ${stats.loadErrors
         .slice(-3)
+        .map((e) => escapeMdInline(e, 120))
         .join(' | ')}`,
       fix: 'Reproduce the failing load (invalid front-matter, missing SKILL.md, unreadable resource base) and repair the skill so the `skill` tool returns content.',
     })
@@ -289,7 +306,7 @@ export function buildAdvice({
     })
   }
 
-  if (stats.tokensPerLoad !== null && stats.tokensPerLoad > tokenBudgetPerLoad * 1.25) {
+  if (stats.tokensPerLoad !== null && stats.tokenWindows >= 3 && stats.tokensPerLoad > tokenBudgetPerLoad * 1.25) {
     out.push({
       id: 'token-cost',
       severity: 'warning',
@@ -303,19 +320,22 @@ export function buildAdvice({
   }
 
   if (stats.loopErrorRate !== null && stats.loopErrorRate > 0.2) {
-    out.push({
-      id: 'loop-errors',
-      severity: 'critical',
-      dimension: 'reliability',
-      title: 'The agent loop breaks after this skill is loaded',
-      evidence: `${pct(stats.loopErrorRate)} of runs hit an agent-loop error after the load${
-        Object.keys(stats.loopErrorNames ?? {}).length ? ` (${topKeys(stats.loopErrorNames).join(', ')})` : ''
-      }`,
-      fix: 'The body is steering the model into an unreachable state (a tool or command that does not exist, an instruction that cannot be followed). Check every tool/command the body names and remove steps the loop cannot execute.',
-    })
+    const loopGate = gate((w) => (w.loopErrors || 0) > 0, 0.2)
+    if (loopGate.level !== 'none') {
+      out.push({
+        id: 'loop-errors',
+        severity: loopGate.level === 'strong' ? 'critical' : 'info',
+        dimension: 'reliability',
+        title: 'The agent loop breaks after this skill is loaded',
+        evidence: `${pct(stats.loopErrorRate)} of runs hit an agent-loop error after the load${
+          Object.keys(stats.loopErrorNames ?? {}).length ? ` (${topKeys(stats.loopErrorNames).join(', ')})` : ''
+        }${noiseNote(loopGate.ci, 0.2, loopGate.level)}`,
+        fix: 'The body is steering the model into an unreachable state (a tool or command that does not exist, an instruction that cannot be followed). Check every tool/command the body names and remove steps the loop cannot execute.',
+      })
+    }
   }
 
-  if (stats.llmRetries > 0 && stats.closed > 0 && stats.llmRetries / stats.closed >= 2) {
+  if (stats.llmRetries > 0 && stats.closed >= 3 && stats.closed > 0 && stats.llmRetries / stats.closed >= 2) {
     out.push({
       id: 'llm-retries',
       severity: 'warning',
@@ -334,7 +354,7 @@ export function buildAdvice({
       dimension: 'effectiveness',
       title: 'The user rejects the result right after the skill runs',
       evidence: `${pct(stats.correctionRate)} of runs were followed by a correcting message (e.g. “${
-        stats.corrections[0] ?? ''
+        escapeMdInline(stats.corrections[0] ?? '', 80) ?? ''
       }”)${noiseNote(correctionGate.ci, 0.3, correctionGate.level)}`,
       fix: 'The body likely ignores stated constraints. Tighten the output contract and the "do not" list; add a short self-check the model must run before answering.',
     })
@@ -393,9 +413,20 @@ export function buildAdvice({
   }
 
   // ---- pruning (RRSI: components that stop earning their place are removed) ----
+  // Deletion advice is destructive: require a real sample (default 12, never
+  // below 6), a bootstrap interval that stays below the bar, and never fire on
+  // point estimates alone (ciResamples=0 disables intervals → no prune).
   const total = typeof score?.total === 'number' ? score.total : null
   const ci = score?.ci ?? null
-  if (total !== null && stats.loads >= pruneMinLoads && total < pruneMaxScore && (!ci || ci.high < pruneMaxScore + 5)) {
+  const effectivePruneMin = Math.max(6, pruneMinLoads)
+  if (
+    total !== null &&
+    stats.loads >= effectivePruneMin &&
+    total < pruneMaxScore &&
+    ci &&
+    typeof ci.high === 'number' &&
+    ci.high < pruneMaxScore + 5
+  ) {
     out.push({
       id: 'prune-candidate',
       severity: 'critical',
@@ -563,7 +594,9 @@ export function buildMcpAdvice(
     const calls = row.calls ?? 0
     const errors = row.errors ?? 0
     const errorRate = typeof row.errorRate === 'number' ? row.errorRate : calls > 0 ? errors / calls : 0
-    if (calls > 0 && errorRate > errorRateLimit) {
+    // Single-call servers (1/1) must not raise critical: require a minimum
+    // sample before judging shared infrastructure.
+    if (calls >= 5 && errorRate > errorRateLimit) {
       out.push({
         id: 'mcp-server-errors',
         severity: 'critical',

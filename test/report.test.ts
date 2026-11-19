@@ -416,7 +416,7 @@ test('the report exposes MCP advice and honours custom MCP thresholds', async ()
       errorNames: [],
       corrections: [],
       otherSkills: [],
-      mcp: { context7: { calls: 4, errors: 1, ms: 800, samples: [200, 200, 200, 200], tools: {} } },
+      mcp: { context7: { calls: 6, errors: 2, ms: 1200, samples: [200, 200, 200, 200, 200, 200], tools: {} } },
       turnEnded: true,
       truncated: false,
       closeReason: 'user-turn',
@@ -676,9 +676,97 @@ test('per-MCP-tool latency reaches the report and the markdown board', async () 
     assert.equal(tool.p95Ms, 9000)
     assert.equal(tool.avgMs, 3000)
     assert.ok(report.mcpAdvice.some((item) => item.id === 'mcp-tool-slow'))
+    assert.equal(report.mcp.toolP95Ms, 5000)
     const markdown = renderMcpMarkdown(report)
     assert.match(markdown, /Slowest tools \(p95\)/)
     assert.match(markdown, /query-docs.*p95 9000ms/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the markdown MCP view honors the configured tool p95 threshold', () => {
+  const row = {
+    server: 'srv',
+    health: 80,
+    grade: 'B',
+    calls: 10,
+    errors: 0,
+    errorRate: 0,
+    avgMs: 1000,
+    p50Ms: 900,
+    p95Ms: 1200,
+    samples: 10,
+    tools: [{ tool: 'slowtool', calls: 5, errors: 0, errorRate: 0, avgMs: 1500, p50Ms: 1200, p95Ms: 2000 }],
+  }
+  const tight = renderMcpMarkdown({
+    mcpServers: [row],
+    mcpAdvice: [],
+    mcp: { p95Ms: 3000, errorRatePercent: 20, toolP95Ms: 1000, toolErrorRatePercent: 30 },
+  })
+  assert.match(tight, /slowtool/)
+  const loose = renderMcpMarkdown({
+    mcpServers: [row],
+    mcpAdvice: [],
+    mcp: { p95Ms: 3000, errorRatePercent: 20, toolP95Ms: 5000, toolErrorRatePercent: 30 },
+  })
+  assert.doesNotMatch(loose, /slowtool/)
+  const legacy = renderMcpMarkdown({ mcpServers: [row], mcpAdvice: [] })
+  assert.doesNotMatch(legacy, /slowtool/, 'older payloads fall back to the 5000ms default')
+})
+
+test('report steps include every step shown in the recent stepTurns window', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-steps-window-'))
+  try {
+    const store = new EventStore(dir)
+    const started = Date.now()
+    await store.append({
+      t: 'step',
+      at: started,
+      sessionId: 's',
+      turn: 1,
+      step: 1,
+      toolCalls: 1,
+      errors: 0,
+      skills: ['orca-computer-use'],
+    })
+    for (let step = 2; step <= 50; step += 1) {
+      await store.append({
+        t: 'step',
+        at: started + step,
+        sessionId: 's',
+        turn: 1,
+        step,
+        toolCalls: 1,
+        errors: 0,
+        skills: [],
+      })
+    }
+    for (let turn = 2; turn <= 12; turn += 1) {
+      for (let step = 1; step <= 40; step += 1) {
+        await store.append({
+          t: 'step',
+          at: started + turn * 100 + step,
+          sessionId: 's',
+          turn,
+          step,
+          toolCalls: 1,
+          errors: 0,
+          skills: [],
+        })
+      }
+    }
+    await store.queue
+    const report = await createAnalyzer(fakeCtx(), { dataDir: dir }).build()
+    const keyOf = (step: { sessionId?: string; turn?: number | null; step?: number | null; at?: number | null }) =>
+      `${step.sessionId}#${step.turn}#${step.step}#${step.at}`
+    const inTurns = new Set(report.stepTurns.flatMap((turn) => (turn.steps || []).map(keyOf)))
+    const inSteps = new Set((report.steps || []).map(keyOf))
+    for (const key of inTurns) {
+      assert.ok(inSteps.has(key), `stepTurns entry ${key} missing from report.steps`)
+    }
+    const skillSteps = (report.steps || []).filter((step) => (step.skills || []).includes('orca-computer-use'))
+    assert.equal(skillSteps.length, 1, 'the skill-bearing step in the 12-turn window must survive the steps payload')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

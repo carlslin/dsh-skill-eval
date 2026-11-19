@@ -1,8 +1,14 @@
 // ------------------------------------------------------------ settings
 // Units ship in English from the settings API; the Chinese form localizes them.
-const UNIT_ZH: Record<string, string> = { loads: '次加载', tokens: 'token', edits: '次修改' }
-const unitLabel = (unit: string | undefined, lang: string) =>
-  !unit ? '' : lang === 'zh' ? UNIT_ZH[unit] || unit : unit
+const UNIT_ZH: Record<string, string> = {
+  loads: '次加载',
+  tokens: 'token',
+  edits: '次修改',
+  calls: '次调用',
+  boards: '块看板',
+}
+const unitLabel = (unit: string | undefined, lang: string, unitZh?: string) =>
+  !unit ? '' : lang === 'zh' ? unitZh || UNIT_ZH[unit] || unit : unit
 
 const settingsStore = createStore<{
   loading: boolean
@@ -57,20 +63,51 @@ async function fetchSettings() {
   return data
 }
 
+type SettingsSavePayload = {
+  saved?: boolean
+  errors?: Array<{ message?: string }>
+  values?: Record<string, unknown>
+}
+
+async function postSettingsPayload(
+  url: string,
+  values: Record<string, unknown>,
+): Promise<{ response: Response; payload: SettingsSavePayload }> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json', 'x-skill-eval-config': '1' },
+    body: JSON.stringify(values),
+  })
+  const type =
+    (response.headers && typeof response.headers.get === 'function' && response.headers.get('content-type')) || ''
+  // A stale prefix route answers 200 HTML for an unclaimed versioned path, and
+  // an older generation answers 404 there; both must retry the canonical route.
+  // A JSON 400 is a real validation error and stays on this route.
+  if (response.status === 404 || type.indexOf('json') === -1) {
+    const error: FetchError = new Error(
+      response.status === 404 ? 'HTTP 404' : !response.ok ? 'HTTP ' + response.status : 'host-too-old',
+    )
+    error.status = response.status
+    error.notJson = type.indexOf('json') === -1
+    throw error
+  }
+  return { response, payload: (await response.json()) as SettingsSavePayload }
+}
+
 async function saveSettings(values: Record<string, unknown>): Promise<boolean> {
   // Invalidate any in-flight GET; its snapshot predates this save.
   settingsGeneration += 1
   settingsStore.set((state) => ({ ...state, saving: true, error: null, savedAt: 0 }))
   try {
-    const post = (url: string) =>
-      fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json', 'x-skill-eval-config': '1' },
-        body: JSON.stringify(values),
-      })
-    let response = await post(SETTINGS_URL)
-    if (response.status === 404) response = await post(SETTINGS_URL_FALLBACK)
-    const payload = await response.json()
+    let result: { response: Response; payload: SettingsSavePayload }
+    try {
+      result = await postSettingsPayload(SETTINGS_URL, values)
+    } catch (raw) {
+      const error = raw as FetchError | null
+      if (!error || (error.status !== 404 && !error.notJson)) throw error
+      result = await postSettingsPayload(SETTINGS_URL_FALLBACK, values)
+    }
+    const { response, payload } = result
     if (!response.ok || payload.saved !== true) {
       settingsStore.set((state) => ({
         ...state,
@@ -205,7 +242,7 @@ function SettingsForm(props: { webOpen?: boolean }) {
                     'aria-label': lang === 'zh' ? field.labelZh || field.label : field.label,
                     onChange: (event) => set(field.key, event.currentTarget.value),
                   }),
-                  field.unit ? h('em', null, unitLabel(field.unit, lang)) : null,
+                  field.unit ? h('em', null, unitLabel(field.unit, lang, field.unitZh)) : null,
                 ),
           ),
         ),
@@ -213,26 +250,32 @@ function SettingsForm(props: { webOpen?: boolean }) {
     ),
     h(
       'div',
-      { className: 'sev-settings-actions' },
-      h(
-        'button',
-        { type: 'button', className: 'sev-btn', disabled: state.saving, onClick: save },
-        state.saving ? t.settingsSaving : t.settingsSave,
-      ),
-      webOpen
-        ? h(
-            'button',
-            {
-              type: 'button',
-              className: 'sev-btn sev-btn--ghost',
-              onClick: () => window.open(configUrl(), '_blank', 'noopener'),
-            },
-            t.settingsOpenWeb,
-          )
+      { className: 'sev-settings-footer' },
+      state.savedAt
+        ? h('div', { className: 'sev-settings-status', role: 'status', 'aria-live': 'polite' }, t.settingsSaved)
         : null,
+      state.error && data ? h('div', { className: 'sev-settings-status sev-error', role: 'alert' }, state.error) : null,
+      h(
+        'div',
+        { className: 'sev-settings-actions' },
+        h(
+          'button',
+          { type: 'button', className: 'sev-btn', disabled: state.saving, onClick: save },
+          state.saving ? t.settingsSaving : t.settingsSave,
+        ),
+        webOpen
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'sev-btn sev-btn--ghost',
+                onClick: () => window.open(configUrl(), '_blank', 'noopener'),
+              },
+              t.settingsOpenWeb,
+            )
+          : null,
+      ),
     ),
-    state.savedAt ? h('div', { className: 'sev-settings-status' }, t.settingsSaved) : null,
-    state.error && data ? h('div', { className: 'sev-settings-status sev-error' }, state.error) : null,
   )
 }
 

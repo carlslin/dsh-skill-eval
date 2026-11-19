@@ -308,11 +308,16 @@ test('dashboardPath is configurable and still serves data off its own prefix', a
       exact.sort(),
       [
         // pages follow dashboardPath; the client bundle's data/settings
-        // contract stays under the fixed /skill-eval base
+        // contract stays under the fixed /skill-eval base, mirrored under the
+        // custom base so a moved board keeps exact-route aliases too
         '/skill-metrics',
         '/skill-metrics/config',
         `/skill-metrics/board/${version}`,
         `/skill-metrics/board/${version}/config`,
+        '/skill-metrics/data',
+        `/skill-metrics/data/${version}`,
+        '/skill-metrics/settings',
+        `/skill-metrics/settings/${version}`,
         `/skill-eval/data/${version}`,
         '/skill-eval/data',
         `/skill-eval/settings/${version}`,
@@ -938,5 +943,29 @@ test('saved settings.json values are normalized before they are applied', async 
     const payload = JSON.parse(res.body)
     assert.equal(payload.values.minSamples, 5)
     assert.equal(payload.values.windowTtlMs, 30 * 60_000)
+  })
+})
+
+test('saved settings win over a profile snapshots object', async () => {
+  await withDataDir(async (dataDir) => {
+    await writeFile(
+      `${dataDir}/settings.json`,
+      JSON.stringify({ reportOnTurnEnd: true, turnReports: true, turnReportsKeep: 7 }),
+    )
+    const { ctx, registered } = fakeCtx()
+    apply(ctx, {
+      enabled: true,
+      dataDir,
+      snapshots: { latest: false, turns: false, keep: 2 },
+    })
+    const route = registered.routes.find((item) => item.kind === 'exact' && item.path === '/skill-eval/settings')
+    const { req, res, flush } = fakeHttp('GET', '/skill-eval/settings')
+    const pending = route.handler(req, res)
+    flush()
+    await pending
+    const payload = JSON.parse(res.body)
+    assert.equal(payload.values.reportOnTurnEnd, true)
+    assert.equal(payload.values.turnReports, true)
+    assert.equal(payload.values.turnReportsKeep, 7)
   })
 })

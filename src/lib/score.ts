@@ -231,11 +231,11 @@ const STATIC_CHECKS: Array<{ id: string; weight: number; label: string; evaluate
       weight: 8,
       label: 'every referenced file exists',
       // null = cannot be checked here (no filesystem view); the check is then
-      // excluded from the static score instead of pretending to pass.
+      // excluded from the static score instead of pretending to pass or fail.
       evaluate: (s) => {
         const integrity = s.integrity
         if (!integrity || typeof integrity.checked !== 'number') return null
-        if (integrity.checked === 0) return 1
+        if (integrity.checked === 0) return null
         const missing = integrity.missing?.length ?? 0
         return (integrity.checked - missing) / integrity.checked
       },
@@ -280,13 +280,15 @@ export function staticProfile(
   const counted = checks.filter((c): c is Extract<(typeof checks)[number], { fraction: number }> => !('skipped' in c))
   const earned = counted.reduce((a, c) => a + c.weight * c.fraction, 0)
   const totalWeight = counted.reduce((a, c) => a + c.weight, 0)
+  // All checks skipped (e.g. future rule set) — explicit null instead of 0/0.
+  const score = totalWeight > 0 ? round((earned / totalWeight) * 100, 1) : null
   // The full body is only needed while the checks run; persisting it would
   // duplicate every SKILL.md into the append-only store and every report JSON.
   const { content: _body, ...persisted } = view
   return {
     ...persisted,
     checks,
-    score: round((earned / totalWeight) * 100, 1),
+    score,
     failedChecks: counted.filter((c) => c.fraction < 1),
   }
 }
@@ -508,6 +510,8 @@ function efficiencyScore(stats: Stats, tokenBudgetPerLoad = 20000): number | nul
  * Composite score. Dimensions that have no evidence (no samples / unresolvable
  * skill) are dropped and their weight is redistributed over the rest, so a
  * brand-new skill is not punished for having no history.
+ * Partial weights merge over the defaults: passing { reliability: 0.5 } only
+ * overrides that dimension instead of zeroing the other three.
  */
 export function scoreSkill({
   stats,
@@ -530,14 +534,30 @@ export function scoreSkill({
     effectiveness: effectivenessScore(stats),
     efficiency: efficiencyScore(stats, tokenBudgetPerLoad),
   }
+  // Merge partial overrides over the defaults, sanitize, and fall back to the
+  // defaults when nothing positive remains. Direct callers (tests, scripts)
+  // must get the same semantics as report.normalizeWeights.
+  const merged: Record<keyof Weights, number> = { ...DEFAULT_WEIGHTS, ...(weights ?? {}) }
+  for (const key of Object.keys(merged) as Array<keyof Weights>) {
+    const w = Number(merged[key])
+    merged[key] = Number.isFinite(w) && w > 0 ? w : 0
+  }
+  if (!Object.values(merged).some((w) => w > 0)) Object.assign(merged, DEFAULT_WEIGHTS)
+  // Sort inverted threshold overrides (e.g. {excellent:50, good:90}) instead of
+  // trusting caller order; gradeOf assumes excellent>=good>=pass.
+  const bands = [thresholds.excellent ?? 90, thresholds.good ?? 80, thresholds.pass ?? 70]
+    .map((v) => (Number.isFinite(Number(v)) && Number(v) > 0 && Number(v) <= 100 ? Number(v) : NaN))
+    .map((v, i) => (Number.isFinite(v) ? v : [90, 80, 70][i]))
+    .sort((a, b) => b - a)
+  const cleanThresholds = { excellent: bands[0], good: bands[1], pass: bands[2] }
   let weighted = 0
   let weightSum = 0
   const used: Partial<Weights> = {}
   for (const key of Object.keys(dims) as Array<keyof Weights>) {
     const value = dims[key]
     if (value === null || value === undefined || !Number.isFinite(value)) continue
-    const w = Number(weights[key] ?? 0)
-    if (w <= 0) continue
+    const w = merged[key]
+    if (!(w > 0)) continue
     weighted += value * w
     weightSum += w
     used[key] = w
@@ -547,7 +567,7 @@ export function scoreSkill({
     stats.loads === 0 ? 'none' : stats.loads < minSamples ? 'low' : stats.loads < minSamples * 3 ? 'medium' : 'high'
   return {
     total,
-    grade: gradeOf(total, thresholds),
+    grade: gradeOf(total, cleanThresholds),
     provisional: stats.loads < minSamples,
     confidence,
     samples: stats.loads,
@@ -558,11 +578,6 @@ export function scoreSkill({
   }
 }
 
-/**
- * Bootstrap interval for a rate measured over windows (correction rate, error
- * rate, ...). Advice uses it as a noise floor: a rule only keeps its severity
- * when the interval's low end is already past the threshold.
- */
 /**
  * Bootstrap interval for a call-weighted rate. Advice reports "X% of the tool
  * calls inside the window failed", so its noise floor must resample calls, not
@@ -593,7 +608,9 @@ export function bootstrapCallRate(
   }
   if (rates.length === 0) return null
   rates.sort((a, b) => a - b)
-  const at = (p: number) => rates[Math.min(rates.length - 1, Math.max(0, Math.round(p * (rates.length - 1))))]
+  // Nearest-rank quantile: Math.round() collapses small-n intervals to a
+  // single discrete point; ceil keeps the 2.5%/97.5% ranks honest.
+  const at = (p: number) => rates[Math.min(rates.length - 1, Math.max(0, Math.ceil(p * rates.length) - 1))]
   return {
     mean: Math.min(1, totalErrors / totalCalls),
     low: at(0.025),
@@ -620,7 +637,7 @@ export function bootstrapRate<T>(
     rates.push(hits / rows.length)
   }
   rates.sort((a, b) => a - b)
-  const at = (p: number) => rates[Math.min(rates.length - 1, Math.max(0, Math.round(p * (rates.length - 1))))]
+  const at = (p: number) => rates[Math.min(rates.length - 1, Math.max(0, Math.ceil(p * rates.length) - 1))]
   const mean = rows.filter(isHit).length / rows.length
   return { mean, low: at(0.025), high: at(0.975), resamples: rates.length, windows: rows.length }
 }

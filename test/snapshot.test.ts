@@ -247,6 +247,36 @@ test('per-turn boards are trimmed to the configured count', async () => {
   }
 })
 
+test('the per-turn keep count is read live, so a settings change applies without rebuild', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-turns-'))
+  try {
+    let turn = 0
+    const cfg = { keep: 4 }
+    const snapshots = createSnapshots({
+      analyzer: {
+        async build() {
+          turn += 1
+          return partial<Report>({ ...TURN_REPORT, turnLoads: [{ sessionId: 's', turn, firstAt: 1, lastAt: turn }] })
+        },
+      },
+      dir,
+      debounceMs: 1,
+      turnReports: true,
+      turnReportsKeep: () => cfg.keep,
+    })
+    for (let index = 0; index < 3; index += 1) await snapshots.writeNow()
+    assert.equal((await listTurnReports(dir)).length, 3)
+    cfg.keep = 1
+    await snapshots.writeNow()
+    const rows = await listTurnReports(dir)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].turn, 4)
+    await snapshots.dispose()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('turn reports can be disabled without touching the latest snapshot', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'skill-eval-turns-'))
   try {

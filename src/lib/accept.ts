@@ -18,9 +18,7 @@ export interface CheckResult {
   unreachable?: boolean
 }
 
-export const REQUIRED_REPORT_KEYS = ['scoring', 'mcpServers', 'runs', 'skill', 'skills', 'totals'].filter(
-  (key) => key !== 'skill',
-)
+export const REQUIRED_REPORT_KEYS = ['scoring', 'mcpServers', 'runs', 'skills', 'totals']
 export const REQUIRED_SCORING_KEYS = ['weights', 'weightsPercent', 'thresholds', 'minSamples']
 export const STALE_HINT =
   'the running host still serves an older plugin generation: quit and reopen DeepSeek Harness once'

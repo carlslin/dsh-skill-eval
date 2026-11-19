@@ -106,11 +106,16 @@ export function createSnapshots({
   log?: (message: string) => void
   enabled?: boolean | (() => boolean)
   turnReports?: boolean | (() => boolean)
-  turnReportsKeep?: number
+  turnReportsKeep?: number | (() => number)
 }) {
   // Getters so a settings change applies without recreating the snapshotter.
   const latestEnabled = () => (typeof enabled === 'function' ? enabled() !== false : enabled !== false)
   const turnsEnabled = () => (typeof turnReports === 'function' ? turnReports() !== false : turnReports !== false)
+  const keepCount = () => {
+    const raw = typeof turnReportsKeep === 'function' ? turnReportsKeep() : turnReportsKeep
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+  }
   let timer: ReturnType<typeof setTimeout> | null = null
   let running: Promise<void> | null = null
   let pending = false
@@ -194,14 +199,15 @@ export function createSnapshots({
             await writeAtomic(path.join(turnsDir, `${slug}.json`), JSON.stringify(report, null, 2))
             await writeAtomic(path.join(turnsDir, `${slug}.md`), markdown)
           }
-          if (turnReportsKeep > 0) {
+          const keep = keepCount()
+          if (keep > 0) {
             const files = (await fs.readdir(turnsDir)).filter((name) => name.endsWith('.json'))
-            if (files.length > turnReportsKeep) {
+            if (files.length > keep) {
               const withStats = await Promise.all(
                 files.map(async (name) => ({ name, at: (await fs.stat(path.join(turnsDir, name))).mtimeMs })),
               )
               withStats.sort((a, b) => b.at - a.at)
-              for (const stale of withStats.slice(turnReportsKeep)) {
+              for (const stale of withStats.slice(keep)) {
                 await fs.rm(path.join(turnsDir, stale.name), { force: true })
                 await fs.rm(path.join(turnsDir, stale.name.replace(/\.json$/, '.md')), { force: true })
               }

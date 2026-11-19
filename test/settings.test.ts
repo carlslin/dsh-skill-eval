@@ -15,6 +15,8 @@ import {
   updateSettings,
   SETTINGS_FIELDS,
   SETTINGS_GROUPS,
+  UNIT_ZH,
+  unitLabel,
 } from '../src/lib/settings.ts'
 
 test('submitted values are validated against the field bounds', () => {
@@ -144,6 +146,36 @@ test('overrides save, load (sync and async) and re-apply to a config object', as
   }
 })
 
+test('a settings save canonicalises snapshot aliases so reload cannot undo it', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'sev-settings-alias-'))
+  try {
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ snapshots: { latest: false, turns: false, keep: 5 } }))
+    await updateSettings(dir, { reportOnTurnEnd: true, turnReports: true, turnReportsKeep: 9 })
+    const raw = await loadSettings(dir)
+    assert.equal(raw.reportOnTurnEnd, true)
+    assert.equal(raw.turnReports, true)
+    assert.equal(raw.turnReportsKeep, 9)
+    assert.equal('snapshots' in raw, false, 'nested alias object is collapsed')
+    const cfg: Record<string, unknown> = {}
+    applySettings(cfg, normalizeSettings(raw).values)
+    assert.equal(cfg.reportOnTurnEnd, true)
+    assert.equal(cfg.turnReports, true)
+    assert.equal(cfg.turnReportsKeep, 9)
+
+    // A partial save still preserves the sibling values the aliases carried.
+    await writeFile(file, JSON.stringify({ 'snapshots.latest': false, 'snapshots.turns': false, 'snapshots.keep': 5 }))
+    await updateSettings(dir, { reportOnTurnEnd: true })
+    const partial = await loadSettings(dir)
+    assert.equal(partial.reportOnTurnEnd, true)
+    assert.equal(partial.turnReports, false)
+    assert.equal(partial.turnReportsKeep, 5)
+    assert.equal('snapshots.latest' in partial, false, 'dotted aliases are collapsed')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('the configuration page lists every field and reports save state', () => {
   const cfg = {
     weights: { static: 0.3, reliability: 0.25, effectiveness: 0.3, efficiency: 0.15 },
@@ -206,4 +238,27 @@ test('a cleared numeric field is an error, not a silent zero', () => {
   const { values, errors } = normalizeSettings({ 'weights.static': '0' })
   assert.deepEqual(errors, [])
   assert.equal(values['weights.static'], 0)
+})
+
+test('Chinese unit labels cover every English unit used by the form, including boards and calls', () => {
+  const units = [...new Set(SETTINGS_FIELDS.map((field) => field.unit).filter((unit): unit is string => Boolean(unit)))]
+  assert.ok(units.includes('boards'))
+  assert.ok(units.includes('calls'))
+  // Word units are localized; symbols such as % and ms stay as-is.
+  for (const unit of ['loads', 'edits', 'calls', 'boards']) {
+    assert.ok(unit in UNIT_ZH, unit)
+    assert.notEqual(unitLabel(unit, true), unit, `${unit} must have a Chinese label`)
+    assert.equal(unitLabel(unit, true), UNIT_ZH[unit])
+  }
+  assert.equal(unitLabel('boards', true), '块看板')
+  assert.equal(unitLabel('calls', true), '次调用')
+  assert.equal(unitLabel('boards', false), 'boards')
+})
+
+test('the Chinese settings page localizes boards and calls units', () => {
+  const html = renderConfigHtml({ config: {}, base: '/skill-eval', lang: 'zh' })
+  assert.match(html, /块看板/)
+  assert.match(html, /次调用/)
+  assert.doesNotMatch(html, />boards</)
+  assert.doesNotMatch(html, />calls</)
 })

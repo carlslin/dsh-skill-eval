@@ -6,23 +6,49 @@
  * Pure: it reads a report and returns a plan; nothing is applied here.
  */
 
-import { EDIT_DIMENSIONS } from './report.ts'
-import type { Report, SkillEntry } from './report.ts'
+import { EDIT_DIMENSIONS } from './dimensions.ts'
+import { escapeMdCell } from './html.ts'
 import type { Advice } from './types.ts'
+
+/**
+ * Minimal view of a scored skill the loop planner needs. Structural on
+ * purpose: report.ts embeds the computed plans, so importing its types here
+ * would tie the planner back to the aggregator (and to a type-inference
+ * cycle through the inferred `Report` type).
+ */
+export interface LoopSkillEntry {
+  skill: string
+  score?: {
+    total?: number | null
+    grade?: string | null
+    provisional?: boolean | null
+    samples?: number | null
+    minSamples?: number | null
+    ci?: { low: number; high: number } | null
+  } | null
+  advice?: Advice[] | null
+  adviceBudget?: number | null
+  exploration?: { stuck: string; suggestion: string; reason: string } | null
+}
+
+export interface LoopReportView {
+  skills?: LoopSkillEntry[] | null
+  scoring?: { minSamples?: unknown; editBudgetMax?: unknown } | null
+}
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 }
 
-function scoreLine(entry: { score?: SkillEntry['score'] | null }): string {
-  const score: Partial<SkillEntry['score']> = entry.score ?? {}
+function scoreLine(entry: { score?: LoopSkillEntry['score'] | null }): string {
+  const score = entry.score ?? {}
   const ci = score.ci ? ` (95% CI ${score.ci.low}-${score.ci.high})` : ''
   return `${score.total ?? '—'}/100 ${score.grade ?? '?'}${ci}`
 }
 
 /** Pick the skill the user should work on next. */
 export function pickLoopTarget(
-  report: Pick<Report, 'skills'> | null | undefined,
+  report: LoopReportView | null | undefined,
   skillName?: string | null,
-): SkillEntry | null {
+): LoopSkillEntry | null {
   const entries = Array.isArray(report?.skills) ? report.skills : []
   if (skillName) return entries.find((entry) => entry.skill === skillName) ?? null
   const withActionable = entries.filter((entry) =>
@@ -54,10 +80,7 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
  * @param {object} report - the analyzer report
  * @param {{skill?: string, editBudgetMax?: number, minSamples?: number, reloads?: number}} options
  */
-export function buildLoopPlan(
-  report: Pick<Report, 'skills' | 'scoring'> | null | undefined,
-  options: LoopOptions = {},
-) {
+export function buildLoopPlan(report: LoopReportView | null | undefined, options: LoopOptions = {}) {
   const budgetMax = finite(options.editBudgetMax) ? options.editBudgetMax : 4
   const reloads = finite(options.reloads) ? options.reloads : (report?.scoring?.minSamples ?? 3)
   const target = pickLoopTarget(report, options.skill)
@@ -125,13 +148,15 @@ export function buildLoopPlan(
 }
 
 export type LoopPlan = ReturnType<typeof buildLoopPlan>
+/** Batch plans for every skill with an actionable fix, worst-first. */
+export type LoopPlans = ReturnType<typeof buildLoopPlans>
 type FullPlan = Extract<LoopPlan, { empty: false }>
 
 export function renderLoopMarkdown(plan: LoopPlan | null | undefined): string {
   if (!plan || plan.empty) {
     return `## Optimization loop\n\n${plan?.reason ?? 'nothing to do'}`
   }
-  const lines = [`## Optimization loop — \`${plan.skill}\``, '']
+  const lines = [`## Optimization loop — \`${escapeMdCell(plan.skill)}\``, '']
   lines.push(`current: **${scoreLine(plan)}** · edit budget this round: **${plan.budget}**`)
   if (plan.exploration) {
     lines.push(`exploration: ${plan.exploration.reason} → target \`${plan.exploration.suggestion}\``)
@@ -167,7 +192,7 @@ const SEVERITY_WEIGHT: Record<string, number> = { critical: 1, warning: 0.5 }
  *         behaviour change), divided so cheaper edits rank higher
  */
 export function impactOf(
-  plan: { score?: SkillEntry['score'] | null; chosen?: Advice[]; dimension?: string | null } | null | undefined,
+  plan: { score?: LoopSkillEntry['score'] | null; chosen?: Advice[]; dimension?: string | null } | null | undefined,
 ) {
   const total = typeof plan?.score?.total === 'number' ? plan.score.total : null
   const chosen = plan?.chosen ?? []
@@ -199,10 +224,7 @@ export function impactOf(
 }
 
 /** Every skill that currently has an actionable fix, worst score first. */
-export function buildLoopPlans(
-  report: Pick<Report, 'skills' | 'scoring'> | null | undefined,
-  options: LoopOptions = {},
-) {
+export function buildLoopPlans(report: LoopReportView | null | undefined, options: LoopOptions = {}) {
   const entries = (Array.isArray(report?.skills) ? report.skills : []).filter((entry) =>
     (entry.advice ?? []).some((item) => item.severity === 'critical' || item.severity === 'warning'),
   )
@@ -225,11 +247,12 @@ export function renderLoopBatchMarkdown(plans: ReturnType<typeof buildLoopPlans>
   for (const plan of plans) {
     const top = plan.chosen?.[0]
     const priority = plan.priority ? ` · priority ${plan.priority.score} (${plan.priority.reasons.join('; ')})` : ''
-    lines.push(`### \`${plan.skill}\` — ${scoreLine(plan)} · budget ${plan.budget}${priority}`)
+    lines.push(`### \`${escapeMdCell(plan.skill)}\` — ${scoreLine(plan)} · budget ${plan.budget}${priority}`)
     if (top) lines.push(`- [${top.severity}] ${top.title}`)
     lines.push(`- fix: ${top ? top.fix : 'none'}`)
     const review = plan.steps?.find((step) => step.kind === 'review')
-    if (review) lines.push(`- screen: \`skill_eval_review {skill:"${plan.skill}", dimension:"${plan.dimension}"}\``)
+    if (review)
+      lines.push(`- screen: \`skill_eval_review {skill:"${escapeMdCell(plan.skill)}", dimension:"${plan.dimension}"}\``)
     if (plan.exploration)
       lines.push(`- explore: ${plan.exploration.reason} → target \`${plan.exploration.suggestion}\``)
     lines.push('')

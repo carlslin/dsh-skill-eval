@@ -24,6 +24,7 @@ export interface SettingsField {
   help?: string
   helpZh?: string
   unit?: string
+  unitZh?: string
   group?: string
   groupZh?: string
 }
@@ -41,6 +42,7 @@ export const SETTINGS_FIELDS: SettingsField[] = [
   { key: 'thresholds.good', label: 'grade B ≥', ...NUMBER(1, 100) },
   { key: 'thresholds.pass', label: 'grade C ≥', ...NUMBER(1, 100) },
   { key: 'minSamples', label: 'min samples for an interval', ...NUMBER(1, 100) },
+  { key: 'windowToolCalls', label: 'window evidence limit (tool calls)', ...NUMBER(1, 200) },
   { key: 'windowTtlMs', label: 'window TTL (ms)', ...NUMBER(60000, 86400000, 60000) },
   { key: 'maxAdvice', label: 'max actionable fixes per report', ...NUMBER(1, 10) },
   { key: 'ciResamples', label: 'bootstrap resamples', ...NUMBER(0, 2000) },
@@ -53,11 +55,16 @@ export const SETTINGS_FIELDS: SettingsField[] = [
   { key: 'editBudgetHorizon', label: 'budget anneal horizon', ...NUMBER(1, 30) },
   { key: 'noveltyWindow', label: 'exploration window', ...NUMBER(2, 10) },
   { key: 'mcpErrorRatePercent', label: 'MCP error-rate alert %', ...NUMBER(1, 100) },
+  { key: 'mcpToolErrorRatePercent', label: 'MCP tool error-rate alert %', ...NUMBER(1, 100) },
   { key: 'mcpP95Ms', label: 'MCP p95 alert (ms)', ...NUMBER(100, 600000) },
+  { key: 'mcpToolP95Ms', label: 'MCP tool p95 alert (ms)', ...NUMBER(100, 600000) },
   { key: 'adviceNoiseFloor', label: 'advice noise floor', ...BOOL },
+  { key: 'redactCorrections', label: 'redact user corrections', ...BOOL },
   { key: 'countTokens', label: 'capture token usage', ...BOOL },
   { key: 'promptHint', label: 'inject prompt hint', ...BOOL },
   { key: 'reportOnTurnEnd', label: 'write snapshot every turn', ...BOOL },
+  { key: 'turnReports', label: 'write per-turn boards', ...BOOL },
+  { key: 'turnReportsKeep', label: 'per-turn boards to keep', ...NUMBER(1, 500) },
 ]
 
 // Short help lines mirror the generic settings layout (label + description +
@@ -71,6 +78,15 @@ const FIELD_HELP: Record<string, { en: string; zh: string }> = {
   'thresholds.good': { en: 'Total score needed to reach grade B.', zh: '总分达到多少才算 B 级。' },
   'thresholds.pass': { en: 'Total score needed to reach grade C.', zh: '总分达到多少才算 C 级。' },
   minSamples: { en: 'Loads before an interval and grade become stable.', zh: '达到多少加载后区间与等级才算稳定。' },
+  windowToolCalls: {
+    en: 'Tool calls after a load that still count as evidence (applies immediately).',
+    zh: '加载后多少次工具调用仍计为证据（立即生效）。',
+  },
+  maxAdvice: { en: 'Actionable fixes shown per skill.', zh: '每个技能展示的可行动修复数。' },
+  ciResamples: {
+    en: 'Bootstrap resamples for the 95% interval (0 disables it; high values cost CPU per report).',
+    zh: '95% 区间的 bootstrap 重采样次数（0 关闭；数值越大每次报告越耗 CPU）。',
+  },
   windowTtlMs: { en: 'How long an open window keeps waiting for follow-up work.', zh: '打开的窗口等待后续工作多久。' },
   tokenBudgetPerLoad: {
     en: 'Billable tokens one load may cost before efficiency reacts.',
@@ -88,7 +104,19 @@ const FIELD_HELP: Record<string, { en: string; zh: string }> = {
     en: 'Only keep a rate-based severity when it clears its 95% interval.',
     zh: '只有越过 95% 区间的比例类问题才保持原严重度。',
   },
+  redactCorrections: {
+    en: 'Store only a redacted placeholder for user correction text.',
+    zh: '用户纠正只存脱敏占位符，不存原文。',
+  },
   pruneMinLoads: { en: 'Loads required before a prune recommendation appears.', zh: '出现剪枝建议前所需的加载次数。' },
+  editBudgetHorizon: {
+    en: 'Accepted edits over which the budget anneals to its minimum.',
+    zh: '编辑预算退火到下限所需的已接受改动数。',
+  },
+  noveltyWindow: {
+    en: 'Consecutive same-dimension edits that trigger exploration.',
+    zh: '连续同维度改动达到多少次时触发探索转向。',
+  },
   pruneMaxScore: {
     en: 'Score below which a well-sampled skill is a prune candidate.',
     zh: '样本充足时，低于该分数会成为剪枝候选。',
@@ -103,13 +131,29 @@ const FIELD_HELP: Record<string, { en: string; zh: string }> = {
     en: 'MCP server p95 latency that raises a slow-server warning.',
     zh: 'MCP 服务器 p95 延迟达到多少时告警。',
   },
+  mcpToolErrorRatePercent: {
+    en: 'Single MCP tool error rate that raises a warning.',
+    zh: '单个 MCP 工具错误率达到多少时告警。',
+  },
+  mcpToolP95Ms: {
+    en: 'Single MCP tool p95 latency that raises a slow-tool warning.',
+    zh: '单个 MCP 工具 p95 延迟达到多少时告警。',
+  },
   promptHint: {
     en: 'One-line system-prompt hint; off means zero fixed token cost.',
     zh: '系统提示里的单行提示；关闭即零固定 token 成本。',
   },
   reportOnTurnEnd: {
-    en: 'Write latest.md/latest.json after each settled turn.',
-    zh: '每个结算回合后写 latest.md/latest.json。',
+    en: 'Write latest.md/latest.json after each settled turn. Trio: latest + turns + keep.',
+    zh: '每个结算回合后写 latest.md/latest.json。快照三件套：latest + turns + keep。',
+  },
+  turnReports: {
+    en: 'Write one board per settled turn under reports/turns/.',
+    zh: '每个结算回合在 reports/turns/ 下写一块看板。',
+  },
+  turnReportsKeep: {
+    en: 'How many per-turn boards to keep.',
+    zh: '保留多少块按回合看板。',
   },
 }
 const FIELD_UNIT: Record<string, string> = {
@@ -118,27 +162,40 @@ const FIELD_UNIT: Record<string, string> = {
   'weights.effectiveness': '%',
   'weights.efficiency': '%',
   minSamples: 'loads',
+  windowToolCalls: 'calls',
   windowTtlMs: 'ms',
   tokenBudgetPerLoad: 'tokens',
   pruneMinLoads: 'loads',
   editBudgetMax: 'edits',
   editBudgetMin: 'edits',
   editBudgetHorizon: 'edits',
+  turnReportsKeep: 'boards',
   mcpP95Ms: 'ms',
+  mcpToolP95Ms: 'ms',
 }
+
+/** Units are stored in English; the Chinese page and the in-panel form use these. */
+export const UNIT_ZH: Record<string, string> = {
+  loads: '次加载',
+  tokens: 'token',
+  edits: '次修改',
+  calls: '次调用',
+  boards: '块看板',
+}
+
 for (const field of SETTINGS_FIELDS) {
   const help = FIELD_HELP[field.key]
   if (help) {
     field.help = help.en
     field.helpZh = help.zh
   }
-  if (FIELD_UNIT[field.key]) field.unit = FIELD_UNIT[field.key]
+  if (FIELD_UNIT[field.key]) {
+    field.unit = FIELD_UNIT[field.key]
+    field.unitZh = UNIT_ZH[field.unit] ?? field.unit
+  }
 }
 
 const FIELD_BY_KEY = new Map(SETTINGS_FIELDS.map((field) => [field.key, field]))
-
-/** Units are stored in English; the Chinese page and the in-panel form use these. */
-export const UNIT_ZH: Record<string, string> = { loads: '次加载', tokens: 'token', edits: '次修改' }
 
 export function unitLabel(unit: string | null | undefined, zh: boolean): string {
   if (!unit) return ''
@@ -149,11 +206,18 @@ export const SETTINGS_GROUPS = [
   {
     title: 'Scoring',
     titleZh: '评分权重与阈值',
-    keys: SETTINGS_FIELDS.filter(
-      (field) =>
-        /^(weights|thresholds|minSamples|ciResamples|maxAdvice)\./.test(field.key) ||
-        ['minSamples', 'maxAdvice', 'ciResamples'].includes(field.key),
-    ).map((field) => field.key),
+    keys: [
+      'weights.static',
+      'weights.reliability',
+      'weights.effectiveness',
+      'weights.efficiency',
+      'thresholds.excellent',
+      'thresholds.good',
+      'thresholds.pass',
+      'minSamples',
+      'maxAdvice',
+      'ciResamples',
+    ],
   },
   { title: 'Cost', titleZh: '成本', keys: ['tokenBudgetPerLoad', 'cacheReadWeight', 'countTokens'] },
   {
@@ -161,6 +225,8 @@ export const SETTINGS_GROUPS = [
     titleZh: '建议与生命周期',
     keys: [
       'adviceNoiseFloor',
+      'redactCorrections',
+      'windowToolCalls',
       'windowTtlMs',
       'pruneMinLoads',
       'pruneMaxScore',
@@ -170,8 +236,16 @@ export const SETTINGS_GROUPS = [
       'noveltyWindow',
     ],
   },
-  { title: 'MCP', titleZh: 'MCP', keys: ['mcpErrorRatePercent', 'mcpP95Ms'] },
-  { title: 'Output', titleZh: '输出', keys: ['promptHint', 'reportOnTurnEnd'] },
+  {
+    title: 'MCP',
+    titleZh: 'MCP',
+    keys: ['mcpErrorRatePercent', 'mcpToolErrorRatePercent', 'mcpP95Ms', 'mcpToolP95Ms'],
+  },
+  {
+    title: 'Snapshots & output',
+    titleZh: '快照与输出',
+    keys: ['promptHint', 'reportOnTurnEnd', 'turnReports', 'turnReportsKeep'],
+  },
 ]
 
 const GROUP_BY_KEY = new Map<string, (typeof SETTINGS_GROUPS)[number]>()
@@ -193,6 +267,7 @@ export const FIELD_ZH: Record<string, string> = {
   'thresholds.good': 'B 级下限',
   'thresholds.pass': 'C 级下限',
   minSamples: '给区间所需最小样本',
+  windowToolCalls: '窗口证据上限 (调用数)',
   maxAdvice: '每轮最多可行动建议',
   ciResamples: 'bootstrap 重采样次数',
   tokenBudgetPerLoad: '单次加载 token 预算',
@@ -205,11 +280,16 @@ export const FIELD_ZH: Record<string, string> = {
   editBudgetHorizon: '预算退火跨度',
   noveltyWindow: '探索窗口',
   mcpErrorRatePercent: 'MCP 错误率告警 %',
+  mcpToolErrorRatePercent: 'MCP 工具错误率告警 %',
   mcpP95Ms: 'MCP p95 告警 (ms)',
+  mcpToolP95Ms: 'MCP 工具 p95 告警 (ms)',
   adviceNoiseFloor: '建议噪声地板',
+  redactCorrections: '脱敏用户纠正',
   countTokens: '采集 token 用量',
   promptHint: '注入提示词',
   reportOnTurnEnd: '每回合写快照',
+  turnReports: '每回合写看板',
+  turnReportsKeep: '看板保留数',
 }
 
 type ConfigTarget = Record<string, unknown>
@@ -259,6 +339,37 @@ export function normalizeSettings(input: Record<string, unknown> | null | undefi
   if (weights.length === 4) {
     const sum = weights.reduce((total, name) => total + (values[`weights.${name}`] as number), 0)
     if (sum <= 0) errors.push({ key: 'weights.total', message: 'weights sum must be positive' })
+  }
+  // Snapshot trio as one object: settings.json (or the settings API) may use
+  // snapshots.latest/turns/keep, or a nested snapshots: {latest, turns, keep}
+  // object, instead of the three flat keys. Dotted keys win over the nested
+  // object when both are present.
+  const nested =
+    input && typeof input.snapshots === 'object' && input.snapshots !== null && !Array.isArray(input.snapshots)
+      ? (input.snapshots as Record<string, unknown>)
+      : null
+  const trio: Record<string, string> = {
+    'snapshots.latest': 'reportOnTurnEnd',
+    'snapshots.turns': 'turnReports',
+    'snapshots.keep': 'turnReportsKeep',
+  }
+  for (const [alias, flat] of Object.entries(trio)) {
+    const leaf = alias.slice('snapshots.'.length)
+    const source = input as Record<string, unknown> | null | undefined
+    const raw = source?.[alias] !== undefined ? source[alias] : nested?.[leaf]
+    if (raw === undefined) continue
+    if (flat === 'turnReportsKeep') {
+      const num =
+        typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : NaN
+      const field = FIELD_BY_KEY.get(flat)
+      if (!Number.isFinite(num) || num < (field?.min ?? -Infinity) || num > (field?.max ?? Infinity)) {
+        errors.push({ key: alias, message: `out of range ${field?.min}..${field?.max}` })
+        continue
+      }
+      values[flat] = num
+      continue
+    }
+    values[flat] = raw === true || raw === 'on' || raw === 'true' || raw === '1'
   }
   return { values, errors }
 }
@@ -316,19 +427,47 @@ function enqueueSettingsWrite(dataDir: string, resolveValues: () => unknown): Pr
  * every override.
  */
 export function saveSettings(dataDir: string, values: Record<string, unknown>): Promise<string> {
-  return enqueueSettingsWrite(dataDir, () => values)
+  return enqueueSettingsWrite(dataDir, () => canonicalSnapshotSettings(values))
+}
+
+/**
+ * Rewrite the snapshot aliases as the three canonical flat keys. The form only
+ * posts flat keys, and aliases take precedence on load, so leaving a stale
+ * `snapshots` object in the file would silently undo every form save after a
+ * restart. Aliased values are read with the normal precedence first, then the
+ * aliases are removed; unrelated keys are preserved.
+ */
+function canonicalSnapshotSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const nested = settings.snapshots
+  const hasNested = Boolean(nested) && typeof nested === 'object' && !Array.isArray(nested)
+  const aliases = ['snapshots.latest', 'snapshots.turns', 'snapshots.keep']
+  if (!hasNested && !aliases.some((key) => key in settings)) return settings
+  const { values } = normalizeSettings(settings)
+  const next = { ...settings }
+  if (typeof values.reportOnTurnEnd === 'boolean') next.reportOnTurnEnd = values.reportOnTurnEnd
+  if (typeof values.turnReports === 'boolean') next.turnReports = values.turnReports
+  if (typeof values.turnReportsKeep === 'number') next.turnReportsKeep = values.turnReportsKeep
+  delete next.snapshots
+  for (const key of aliases) delete next[key]
+  return next
 }
 
 /**
  * Merge a partial patch into the settings file inside the write queue. Two
  * overlapping HTTP saves must not both read the pre-update file and drop each
  * other's field; the whole read-merge-write therefore runs as one queued job.
+ * Snapshot aliases are canonicalised before the merge so a patch that only
+ * carries flat trio keys is never shadowed by a stale alias on the next load.
  */
 export function updateSettings(dataDir: string, patch: unknown): Promise<string> {
-  return enqueueSettingsWrite(dataDir, async () => ({
-    ...(await loadSettings(dataDir)),
-    ...(patch && typeof patch === 'object' ? patch : {}),
-  }))
+  return enqueueSettingsWrite(dataDir, async () => {
+    const canonical = canonicalSnapshotSettings(await loadSettings(dataDir))
+    const merged = {
+      ...canonical,
+      ...(patch && typeof patch === 'object' ? patch : {}),
+    }
+    return canonicalSnapshotSettings(merged)
+  })
 }
 
 /** Synchronous variant used at plugin apply time (the config must exist first). */

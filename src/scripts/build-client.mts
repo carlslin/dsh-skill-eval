@@ -61,8 +61,15 @@ const strip = (text: string, fileName: string) =>
     })
     .outputText.replace(/^"use strict";\s*\n/, '')
 const sections: string[] = []
+// Single source of truth for the client route version: package.json version is
+// injected at build time so src/client/03-data.ts never drifts from releases.
+const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+const manifestVersion = typeof manifest.version === 'string' ? manifest.version : null
 for (const part of parts) {
-  const text = await readFile(path.join(sourceDir, part), 'utf8')
+  let text = await readFile(path.join(sourceDir, part), 'utf8')
+  if (part === '03-data.ts' && manifestVersion) {
+    text = text.replace(/const DATA_VERSION = '[^']*'/, `const DATA_VERSION = '${manifestVersion}'`)
+  }
   sections.push(`    // src/client/${part}\n${indent(strip(text, part).trimEnd())}\n`)
 }
 const output = header + '\n' + sections.join('\n') + footer

@@ -108,6 +108,9 @@ const TEXTS = {
     stepBest: '最高',
     stepFiltered: '只看该技能所在步',
     stepNoSkill: '无技能加载',
+    stepNoFilter: '当前逐步窗口里没有「{skill}」的轨迹。点「全部」可查看已有逐步遥测。',
+    stepNoFilterKnown:
+      '「{skill}」有加载记录，但最近逐步窗口里没有该技能的轨迹。可在「按技能」查看评分，或点「全部」查看已有逐步遥测。',
     runsHead: ['会话', '评分', '加载', '调用', '报错'],
     mcpHead: ['服务器', '健康', '调用', '错误率', 'p50/p95'],
     emptyRuns: '还没有运行记录',
@@ -246,6 +249,9 @@ const TEXTS = {
     stepBest: 'highest',
     stepFiltered: 'steps that loaded this skill',
     stepNoSkill: 'no skill loaded',
+    stepNoFilter: 'No steps in this trajectory window loaded "{skill}". Choose "all" to see existing step telemetry.',
+    stepNoFilterKnown:
+      '"{skill}" has load records, but none of them are in the current step window. See its score under Skills, or choose "all" for existing step telemetry.',
     runsHead: ['session', 'score', 'loads', 'calls', 'errors'],
     mcpHead: ['server', 'health', 'calls', 'errors', 'p50/p95'],
     emptyRuns: 'no runs recorded yet',

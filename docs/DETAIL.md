@@ -443,14 +443,19 @@ Known validity limits, stated as limits rather than fixed:
 ## Configuration keys
 
 The config keys below are the ones worth documenting; the native form renders
-the 25 tunable settings (the authoritative list is `SETTINGS_FIELDS`). Several
+the 31 tunable settings (the authoritative list is `SETTINGS_FIELDS`). Several
 keys here are config-only (`dataDir`, `dashboardPath`, `registerTool`,
 `inspectProvider`). The form persists to `settings.json`;
-`dataDir`/`DSH_SKILL_EVAL_DIR` still wins for the data root.
+`dataDir`/`DSH_SKILL_EVAL_DIR` still wins for the data root. The snapshot trio
+(`reportOnTurnEnd`, `turnReports`, `turnReportsKeep`) can also be set as one
+object — `snapshots: {latest, turns, keep}` in profile config, or
+`snapshots.latest|turns|keep` keys in `settings.json` — which wins over the
+flat keys when present. A settings save rewrites those aliases into the flat
+keys, so the form still wins after a restart.
 
 ```yaml
 enabled: true
-windowToolCalls: 12 # tool calls that count as evidence for one load
+windowToolCalls: 12 # tool calls that count as evidence for one load (live)
 minSamples: 3 # loads before a score stops being provisional
 maxAdvice: 3 # advice items per skill in the summary
 weights: { static: 30, reliability: 25, effectiveness: 30, efficiency: 15 } # normalised to 100%
@@ -462,19 +467,24 @@ turnReportsKeep: 50 # how many per-turn boards to retain
 reportOnTurnEnd: true # write reports/latest.md + latest.json after each turn (no tokens)
 tokenBudgetPerLoad: 20000 # billable tokens per load before efficiency/advice react
 cacheReadWeight: 0 # weight of cached input tokens (near-free by default)
-countTokens: true # attribute real provider usage to skill windows
+countTokens: true # attribute real provider usage to skill windows (split 1/N across parallel windows)
+redactCorrections: false # store "[redacted N chars]" instead of raw user correction text
 adviceNoiseFloor: true # advice must clear its 95% interval to stay critical
 registerReviewTool: true # skill_eval_review: leakage critic + audit ledger
 editBudgetMax: 4 # concurrent edits a first-round skill may carry
 editBudgetMin: 1 # annealed minimum
 editBudgetHorizon: 6 # accepted edits over which the budget anneals
 noveltyWindow: 2 # same-dimension edits that trigger exploration
-pruneMinLoads: 6 # loads before a prune recommendation is allowed
+pruneMinLoads: 12 # loads before a prune recommendation is allowed, never below 6 (needs a 95% interval too)
 pruneMaxScore: 60 # low score + low interval -> prune candidate
+mcpErrorRatePercent: 20 # MCP server error-rate alert % (needs >= 5 calls)
+mcpToolErrorRatePercent: 30 # single MCP tool error-rate alert %
+mcpP95Ms: 3000 # MCP server p95 alert (ms)
+mcpToolP95Ms: 5000 # single MCP tool p95 alert (ms)
 promptHint: true # the one-line system-prompt hint (~60 tokens/turn); false = zero fixed cost
 inspectProvider: true # register the eval data as a Cordis Inspect provider
 registerTool: true
 registerCommand: true
 webDashboard: true # HTML page + the JSON route the client reads (versioned alias included)
-dashboardPath: /skill-eval # change it if a reload could not reclaim the old route
+dashboardPath: /skill-eval # change it if a reload could not reclaim the old route (data/settings mirrored under it)
 ```

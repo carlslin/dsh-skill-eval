@@ -118,6 +118,12 @@ export interface RecorderConfig {
   windowToolCalls?: number
   windowTtlMs?: number
   countTokens?: boolean
+  /**
+   * Store only a redacted placeholder for user correction text (length +
+   * correction flag) instead of the raw message. Rates still work; the report
+   * shows "[redacted N chars]" instead of quoting the user.
+   */
+  redactCorrections?: boolean
 }
 
 /**
@@ -149,8 +155,8 @@ export function createRecorder(
   // them instead of being handed to whichever loaded last.
   const sessions = new Map<string, SessionState>() // sessionId -> { windows: [] }
 
-  const windowLimit = Math.max(1, Number(config.windowToolCalls ?? 12))
-  // Read live: the settings form advertises windowTtlMs as applying immediately.
+  const windowLimit = () => Math.max(1, Number(config.windowToolCalls ?? 12))
+  // Read live: the settings form advertises windowToolCalls/windowTtlMs as applying immediately.
   const ttlMs = () => Math.max(60_000, Number(config.windowTtlMs ?? 30 * 60_000))
 
   function stateFor(sessionId: string): SessionState {
@@ -174,7 +180,10 @@ export function createRecorder(
       }
       if (oldest !== null) {
         const stale = sessions.get(oldest)
-        if (stale) closeWindows(stale, 'evicted')
+        if (stale) {
+          for (const w of stale.windows) w.truncated = true
+          closeWindows(stale, 'evicted')
+        }
         flushStep(oldest, 'evicted')
         sessions.delete(oldest)
         steps.delete(oldest)
@@ -186,9 +195,16 @@ export function createRecorder(
     return state
   }
 
+  const pendingStatics = new Set<Promise<unknown>>()
+  function trackStatic(promise: Promise<unknown>): void {
+    pendingStatics.add(promise)
+    void promise.finally(() => pendingStatics.delete(promise))
+  }
+
   function persist(w: LiveWindow | undefined, closeReason: string): void {
     if (!w) return
     w.flushed = true
+    const redact = config.redactCorrections === true
     void store.append({
       t: 'window',
       v: 1,
@@ -204,7 +220,7 @@ export function createRecorder(
       lastLoopError: w.lastLoopError,
       mcp: w.mcp,
       tokens: w.tokens,
-      corrections: w.corrections.map((text) => text.slice(0, 200)),
+      corrections: w.corrections.map((text) => (redact ? `[redacted ${text.length} chars]` : text.slice(0, 200))),
       otherSkills: [...w.otherSkills],
       origin: w.origin,
       step: w.step,
@@ -398,7 +414,9 @@ export function createRecorder(
         }
       }
       const state = stateFor(sessionId)
-      const windowId = `${sessionId}:${id}`
+      // Namespaced so a user-typed invocation id can never collide with a tool
+      // callId and cross-contaminate another skill's window in foldSamples.
+      const windowId = `inv:${sessionId}:${id}`
       void store.append({
         t: 'skill',
         v: 1,
@@ -413,7 +431,7 @@ export function createRecorder(
         windowId,
       })
       openWindow(state, skill, sessionId, id, steps.get(sessionId), originOf(agent))
-      void captureStatic(skill, agent, undefined, undefined)
+      trackStatic(captureStatic(skill, agent, undefined, undefined))
     }
   }
 
@@ -521,8 +539,19 @@ export function createRecorder(
             if (loaded && !step.skills.includes(loaded)) step.skills.push(loaded)
           }
         }
-        const newest = state.windows[state.windows.length - 1]
-        if (newest && nowMs() - newest.lastActivityAt > ttlMs()) closeWindows(state, 'stale')
+        // Expire each window on its own clock: a busy newest window must not
+        // keep an idle sibling alive forever, nor misattribute later work.
+        // No early return: a first skill load arrives with zero open windows
+        // and must still be recorded below.
+        if (state.windows.length > 0) {
+          const now = nowMs()
+          const ttl = ttlMs()
+          const expired = state.windows.filter((w) => now - w.lastActivityAt > ttl)
+          if (expired.length > 0) {
+            state.windows = state.windows.filter((w) => now - w.lastActivityAt <= ttl)
+            for (const w of expired) persist(w, 'stale')
+          }
+        }
 
         if (exec.name === 'skill') {
           const skill = skillNameOf(exec.arguments)
@@ -547,11 +576,13 @@ export function createRecorder(
           })
           if (ok) {
             openWindow(state, skill, sessionId, exec.callId, steps.get(sessionId), originOf(exec.agent))
-            void captureStatic(
-              skill,
-              exec.agent,
-              exec.signal,
-              result?.value && typeof result.value.content === 'string' ? result.value.content : undefined,
+            trackStatic(
+              captureStatic(
+                skill,
+                exec.agent,
+                exec.signal,
+                result?.value && typeof result.value.content === 'string' ? result.value.content : undefined,
+              ),
             )
           }
           return
@@ -561,7 +592,11 @@ export function createRecorder(
         const current = steps.get(sessionId)
         // Count the call for every window still open in this step: a parallel
         // batch of skill loads is one piece of work, not one winner.
-        const targets = state.windows.filter((w) => current === undefined || w.step === undefined || w.step === current)
+        // An undefined-step window only matches when the current step is also
+        // unknown — otherwise a legacy window would swallow all later work.
+        const targets = state.windows.filter(
+          (w) => current === undefined || (w.step === undefined ? false : w.step === current),
+        )
         const startedAt = starts.get(exec.callId)
         if (exec.callId !== undefined) starts.delete(exec.callId)
         const elapsed = startedAt === undefined ? undefined : nowMs() - startedAt
@@ -569,6 +604,13 @@ export function createRecorder(
         for (const w of targets.length > 0 ? targets : state.windows) {
           w.lastActivityAt = nowMs()
           if (state) state.lastAt = nowMs()
+          // Freeze toolCalls and MCP together once the window is full: the two
+          // rates must share one denominator, otherwise errRate and the MCP
+          // board diverge after truncation.
+          if (w.toolCalls >= windowLimit()) {
+            w.truncated = true
+            continue
+          }
           if (mcp) {
             if (!Object.hasOwn(w.mcp, mcp.server)) {
               w.mcp[mcp.server] = { calls: 0, errors: 0, ms: 0, samples: [], tools: Object.create(null) }
@@ -598,10 +640,6 @@ export function createRecorder(
             }
             w.mcp[mcp.server] = bucket
           }
-          if (w.toolCalls >= windowLimit) {
-            w.truncated = true
-            continue
-          }
           w.toolCalls += 1
           if (result?.isError === true) {
             w.errors += 1
@@ -623,10 +661,13 @@ export function createRecorder(
         if (!sessionId) return
         const state = sessions.get(sessionId)
         if (!state || state.windows.length === 0) return
-        const newest = state.windows[state.windows.length - 1]
-        if (nowMs() - newest.lastActivityAt > ttlMs()) {
-          closeWindows(state, 'stale')
-          return
+        const now = nowMs()
+        const ttl = ttlMs()
+        const expired = state.windows.filter((w) => now - w.lastActivityAt > ttl)
+        if (expired.length > 0) {
+          state.windows = state.windows.filter((w) => now - w.lastActivityAt <= ttl)
+          for (const w of expired) persist(w, 'stale')
+          if (state.windows.length === 0) return
         }
         const text = messageText(payload.message)
         if (text.length > 0 && isCorrection(text)) {
@@ -642,6 +683,9 @@ export function createRecorder(
   // Real provider usage rides on every committed assistant message, so token
   // cost is measured instead of estimated. Usage belongs to the model call that
   // answered the current step, which is exactly the work an open window caused.
+  // Parallel windows share one model call: token amounts are split 1/N so two
+  // skills open at once do not each bill the full call (the per-step total
+  // keeps the full amount; only the per-window attribution is split).
   offs.push(
     ctx.on('session/event', (session: Host, event: Host) => {
       try {
@@ -659,11 +703,12 @@ export function createRecorder(
           step.tokens.calls += 1
         }
         if (!state || state.windows.length === 0) return
+        const share = 1 / state.windows.length
         for (const w of state.windows) {
           const bucket = w.tokens ?? { input: 0, output: 0, cacheRead: 0, calls: 0 }
-          bucket.input += Number(usage.inputTokens) || 0
-          bucket.output += Number(usage.outputTokens) || 0
-          bucket.cacheRead += Number(usage.cacheReadTokens) || 0
+          bucket.input += (Number(usage.inputTokens) || 0) * share
+          bucket.output += (Number(usage.outputTokens) || 0) * share
+          bucket.cacheRead += (Number(usage.cacheReadTokens) || 0) * share
           bucket.calls += 1
           w.tokens = bucket
         }
@@ -694,8 +739,10 @@ export function createRecorder(
 
   return {
     /** Await every write queued so far (used by tests and by the snapshot flush). */
-    flush() {
-      return store.queue
+    async flush() {
+      await store.queue
+      if (pendingStatics.size > 0) await Promise.allSettled([...pendingStatics])
+      await store.queue
     },
     async dispose() {
       for (const sessionId of [...stepStats.keys()]) flushStep(sessionId, 'dispose')
@@ -704,7 +751,9 @@ export function createRecorder(
       steps.clear()
       turns.clear()
       seenInvocations.clear()
-      // let every queued write land before the caller tears the store down
+      // let every queued write land before the caller tears the store down,
+      // including the fire-and-forget static captures above
+      if (pendingStatics.size > 0) await Promise.allSettled([...pendingStatics])
       await store.queue
       for (const off of offs) {
         try {

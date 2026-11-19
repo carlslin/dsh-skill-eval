@@ -134,7 +134,6 @@ export function buildDevReport(input: DevInput = {}) {
       minSamples: config.minSamples ?? null,
       tokenBudgetPerLoad: config.tokenBudgetPerLoad ?? null,
       adviceNoiseFloor: config.adviceNoiseFloor ?? null,
-      enablePopup: null,
     },
     store: {
       dir: store.dir ?? dataDir,

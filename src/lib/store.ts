@@ -89,10 +89,13 @@ async function withFileLock<T>(lockFile: string, fn: () => Promise<T>): Promise<
 
 /**
  * Drop the oldest records once the file outgrows maxBytes. The cut lands on a
- * line boundary so a reader never sees half a record. `edit` records keep up
- * to a quarter of the cap — they are the audit ledger the review budget,
- * board ledger and impact view all read — and the trimmed file is at most
- * half the cap, so the next appends do not rotate again right away.
+ * line boundary so a reader never sees half a record. `edit` records share the
+ * same byte budget but are kept first (up to a quarter of the cap): they are
+ * the audit ledger the review budget, board ledger and impact view all read.
+ * The trimmed file is at most half the cap, so the next appends do not rotate
+ * right away. Note: a single record larger than the cap is still kept, so a
+ * poison record retriggers rotation on every append — keep per-record caps
+ * (samples/corrections truncation) tight upstream.
  */
 async function rotateFile(file: string, maxBytes: number): Promise<void> {
   let raw: string
@@ -131,11 +134,16 @@ async function rotateFile(file: string, maxBytes: number): Promise<void> {
 /**
  * Where telemetry lives. Kept OUTSIDE the session log on purpose: the session
  * log is the harness's source of truth and plugins must not append foreign
- * event types to it.
+ * event types to it. Explicit paths must be absolute and may not be the
+ * filesystem root; operator config is trusted, but a typo pointing at `/`
+ * must fail loudly instead of chmod/chown-ing the machine.
  */
 export function resolveDataDir(config: { dataDir?: unknown } = {}): string {
   const explicit = expandHome(config.dataDir) || expandHome(process.env.DSH_SKILL_EVAL_DIR)
-  if (explicit) return explicit
+  if (explicit) {
+    if (explicit === '/' || explicit === '') throw new Error('skill-eval dataDir must not be the filesystem root')
+    return explicit
+  }
   const home = expandHome(process.env.DSH_HOME) || path.join(os.homedir(), '.dsh')
   const profile = process.env.DSH_PROFILE || 'default'
   return path.join(home, 'skill-eval', profile)
@@ -168,6 +176,59 @@ export class EventStore {
     // Bumped on every successful append; the analyzer uses it to invalidate a
     // cached report without re-reading the whole store on every request.
     this.version = 0
+    this.rotating = null
+  }
+
+  private rotating: Promise<boolean> | null
+
+  /**
+   * Bound the file outside the append lock so a slow multi-MB rewrite never
+   * blocks the next append's critical section. Concurrent overflows coalesce
+   * onto one rotation; the size is re-checked under the rotation lock, so a
+   * file that shrunk (or vanished) concurrently is left alone.
+   */
+  private coalescedRotate(): Promise<boolean> {
+    const current = this.rotating
+    if (current) return current
+    const file = this.file
+    const maxBytes = this.maxBytes
+    const pending: Promise<boolean> = withFileLock(`${file}.lock`, async () => {
+      let size: number
+      try {
+        size = (await fs.stat(file)).size
+      } catch {
+        return
+      }
+      if (size > maxBytes) await rotateFile(file, maxBytes)
+    }).then(
+      () => {
+        if (this.rotating === pending) this.rotating = null
+        return true
+      },
+      (error: unknown) => {
+        this.reportFailure(error)
+        if (this.rotating === pending) this.rotating = null
+        return false
+      },
+    )
+    this.rotating = pending
+    return pending
+  }
+
+  private reportFailure(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    const first = this.failed === null
+    const changed = this.failed !== message
+    this.failed = message
+    // Report the first failure and every *new* failure mode; identical
+    // repeats stay silent so a full disk does not spam the host log.
+    if ((first || changed) && typeof this.onError === 'function') {
+      try {
+        this.onError(message)
+      } catch {
+        // the logger itself must never break recording
+      }
+    }
   }
 
   append(record: unknown): Promise<void> {
@@ -192,16 +253,16 @@ export class EventStore {
             // missing or foreign-owned file: the append below creates it 0600
           }
         }
-        // The torn-tail repair, the rotation and the append itself are one
-        // critical section: a writer in another process must not interleave.
+        // The torn-tail repair and the append itself are one critical
+        // section: a writer in another process must not interleave. Rotation
+        // runs after the append under its own coalesced lock (see below), so
+        // a slow multi-MB rewrite never blocks the next append.
         await withFileLock(`${this.file}.lock`, async () => {
           // A crash can leave a record without its trailing newline. Appending
           // on top of that fragment would glue two records into one unparseable
           // line and silently lose the new record too, so close the tail first.
-          let size = 0
           try {
             const info = await fs.stat(this.file)
-            size = info.size
             if (info.size > 0) {
               const handle = await fs.open(this.file, 'r')
               try {
@@ -215,27 +276,16 @@ export class EventStore {
           } catch (error) {
             if (errorCode(error) !== 'ENOENT') throw error
           }
-          // Bound the file: drop the oldest half once this record would
-          // overflow it. A single record larger than the cap is still kept,
-          // otherwise the append would be silently discarded.
-          if (size > 0 && size + Buffer.byteLength(line as string) + 1 > this.maxBytes)
-            await rotateFile(this.file, this.maxBytes)
           await fs.appendFile(this.file, line + '\n', { encoding: 'utf8', mode: 0o600 })
         })
-        this.failed = null
+        const rotated = await this.coalescedRotate()
+        // The record is already on disk; only clear a prior failure when
+        // rotation also succeeded. A failed rotate must not wipe onError.
+        if (rotated) this.failed = null
         this.version += 1
       })
       .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        const first = this.failed === null
-        this.failed = message
-        if (first && typeof this.onError === 'function') {
-          try {
-            this.onError(message)
-          } catch {
-            // the logger itself must never break recording
-          }
-        }
+        this.reportFailure(error)
       })
       .finally(() => {
         this.pending = Math.max(0, this.pending - 1)
@@ -381,6 +431,9 @@ export function foldSamples(records: readonly StoredRecord[]) {
     }
     const entry = bySkill.get(r.skill) ?? { skill: r.skill, samples: [], firstAt: r.at, lastAt: r.at }
     const window = r.windowId ? byWindow.get(r.windowId) : undefined
+    // Cross-skill windowId collision (invocation id vs tool callId) must not
+    // attach another skill's window: drop the join on mismatch.
+    const joined = window && typeof window.skill === 'string' && window.skill !== r.skill ? undefined : window
     entry.samples.push({
       at: r.at,
       sessionId: r.sessionId,
@@ -390,27 +443,27 @@ export function foldSamples(records: readonly StoredRecord[]) {
       via: r.via === 'invocation' ? 'invocation' : 'tool',
       loadMs: typeof r.loadMs === 'number' ? r.loadMs : undefined,
       error: r.error,
-      window: window
+      window: joined
         ? {
-            toolCalls: Number(window.toolCalls) || 0,
-            errors: Number(window.errors) || 0,
-            errorNames: Array.isArray(window.errorNames)
-              ? window.errorNames.filter((name: unknown) => typeof name === 'string')
+            toolCalls: Number(joined.toolCalls) || 0,
+            errors: Number(joined.errors) || 0,
+            errorNames: Array.isArray(joined.errorNames)
+              ? joined.errorNames.filter((name: unknown) => typeof name === 'string')
               : [],
-            mcp: sanitizeMcp(window.mcp),
-            origin: typeof window.origin === 'string' ? window.origin : null,
+            mcp: sanitizeMcp(joined.mcp),
+            origin: typeof joined.origin === 'string' ? joined.origin : null,
             tokens:
-              window.tokens && typeof window.tokens === 'object'
-                ? window.tokens
+              joined.tokens && typeof joined.tokens === 'object'
+                ? joined.tokens
                 : { input: 0, output: 0, cacheRead: 0, calls: 0 },
-            loopErrors: Number(window.loopErrors) || 0,
-            llmRetries: Number(window.llmRetries) || 0,
-            closeReason: typeof window.closeReason === 'string' ? window.closeReason : null,
-            lastLoopError: typeof window.lastLoopError === 'string' ? window.lastLoopError : null,
-            corrections: Array.isArray(window.corrections) ? window.corrections : [],
-            otherSkills: Array.isArray(window.otherSkills) ? window.otherSkills : [],
-            turnEnded: window.turnEnded === true,
-            truncated: window.truncated === true,
+            loopErrors: Number(joined.loopErrors) || 0,
+            llmRetries: Number(joined.llmRetries) || 0,
+            closeReason: typeof joined.closeReason === 'string' ? joined.closeReason : null,
+            lastLoopError: typeof joined.lastLoopError === 'string' ? joined.lastLoopError : null,
+            corrections: Array.isArray(joined.corrections) ? joined.corrections : [],
+            otherSkills: Array.isArray(joined.otherSkills) ? joined.otherSkills : [],
+            turnEnded: joined.turnEnded === true,
+            truncated: joined.truncated === true,
           }
         : null,
     })

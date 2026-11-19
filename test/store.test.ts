@@ -264,3 +264,34 @@ test('append failures are captured without breaking the queue', async () => {
     assert.equal(records.at(-1)?.skill, 'c')
   })
 })
+
+test('a failed rotation keeps the error and does not wipe a successful append', async () => {
+  await withStore(
+    async (store) => {
+      const seen: string[] = []
+      store.onError = (message) => seen.push(message)
+      // Seed a small file, then append a record that overflows the cap so
+      // rotation runs after the write. A directory at `${file}.tmp` makes
+      // writePrivateAtomic fail (rm without recursive).
+      await store.append({ t: 'window', at: 1, windowId: 'w0', skill: 'a', filler: 'x'.repeat(80) })
+      const before = (await stat(store.file)).size
+      const temp = `${store.file}.tmp`
+      await mkdir(temp)
+      try {
+        await store.append({ t: 'window', at: 99, windowId: 'w-new', skill: 'a', filler: 'y'.repeat(900) })
+        assert.ok(store.failed, `rotation failure should stay recorded, got ${store.failed}`)
+        assert.ok(seen.length > 0, 'onError must fire for a rotation failure')
+        const records = await store.readAll()
+        assert.equal(records.at(-1)?.windowId, 'w-new')
+        const after = (await stat(store.file)).size
+        assert.ok(after > 800, `file should still be over the cap after a failed rotate, got ${after}`)
+        assert.ok(after > before, 'the new record must remain on disk')
+      } finally {
+        await rm(temp, { recursive: true, force: true })
+      }
+      await store.append({ t: 'window', at: 100, windowId: 'w-ok', skill: 'a', filler: 'z'.repeat(40) })
+      assert.equal(store.failed, null)
+    },
+    { maxBytes: 800 },
+  )
+})

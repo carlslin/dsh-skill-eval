@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.22.0 — structural review fixes
+
+- **Entry split into leaf modules.** `src/index.ts` keeps only `Config` + `apply`
+  wiring; HTTP plumbing moved to `src/lib/http.ts`, the report/review tools to
+  `src/lib/tools.ts`, the `/skill-eval` dispatcher to `src/lib/command.ts`, the
+  version manifest to `src/lib/version.ts`. Run/MCP aggregation moved from the
+  `createAnalyzer` closure to `src/lib/runs.ts` (types re-exported), the
+  bootstrap interval to `src/lib/stats.ts`, `EDIT_DIMENSIONS` to
+  `src/lib/dimensions.ts` (loop/report/render import the leaf instead of each
+  other). Behavior is unchanged; `test/refactor.test.ts` (10 tests) pins the
+  new seams.
+- **Every tunable is now UI-editable.** `windowToolCalls`, `mcpToolErrorRatePercent`,
+  `mcpToolP95Ms`, `turnReports`, `turnReportsKeep` joined the settings form (now
+  31 fields); `windowToolCalls` is read live like `windowTtlMs`. New
+  `redactCorrections` switch stores `[redacted N chars]` instead of raw user
+  text. The snapshot trio can be managed as `snapshots: {latest, turns, keep}`
+  (profile config or `settings.json` aliases), overriding the three flat keys.
+- **Correctness fixes.** Parallel windows split token amounts 1/N (steps keep the
+  full total); rotation runs outside the append lock with overflow coalescing;
+  `percentWeights` normalizes before largest-remainder (always sums to 100,
+  even for unnormalized input); manifest lookup probes `./`, `../`, `../../`
+  so `src/lib/*` layouts resolve the version; data/settings exact routes are
+  mirrored under a custom `dashboardPath`.
+- **Review follow-ups.** A failed rotation no longer clears `store.failed` after
+  a successful append. `turnReportsKeep` is read live like the other snapshot
+  switches. A profile `snapshots` object is applied _before_ `settings.json`,
+  so the form still wins, and `snapshots` is declared on the Config schema so
+  the host does not drop it. Nested `snapshots: {latest, turns, keep}` in
+  settings.json is accepted; `windowToolCalls` sits next to `windowTtlMs` in
+  the lifecycle group.
+- **Native review follow-ups.** The in-panel Chinese settings form now
+  translates `calls` / `boards` (次调用 / 块看板) from the same `UNIT_ZH` map
+  as the web page; the settings payload also carries `unitZh`. Clicking
+  查看轨迹 filters the trajectory using the steps on `stepTurns` and, when
+  that skill has no step in the current window, shows a specific empty state
+  with filter chips instead of “还没有逐步遥测”. The report `steps` array
+  includes every step shown in the 12-turn window (no tighter 400-step
+  slice). The native save confirmation sits in a sticky footer above the
+  button with `aria-live`, so a tight host modal no longer clips it. README
+  npm/release badges are pinned to this package version so an unpublished
+  artifact does not display the previous published tag.
+- **Compatibility fixes.** A settings save canonicalises `snapshots` aliases
+  into the flat trio, so a reload can no longer undo the form; the markdown MCP
+  view uses the configured `mcpToolP95Ms` (older payloads fall back to 5000);
+  the native settings form retries the canonical route when a versioned POST
+  answers 200 HTML instead of JSON; README/release counts match this release.
+- **Advice hardening.** Rate gates with fewer than 8 windows cap at `info`;
+  `token-cost` needs at least 3 token-bearing windows; prune advice needs a
+  95% interval and never fewer than 6 loads; MCP server error advice needs at
+  least 5 calls. Scores are unchanged on the same data.
+- Tests: **325 passing** (`npm test`).
+
 ## 1.21.0 — TypeScript sources + per-issue copy
 
 - **The whole codebase is TypeScript (strict).** Sources moved to `src/`
@@ -92,7 +144,7 @@
   `settingsErrors` plus a `settings-invalid` finding instead of counting an
   invalid key as applied, and the load path warns once with the rejected keys.
 - **Docs test counts stay honest.** README, README.zh, CONTRIBUTING and the
-  release checklist now say 272 tests.
+  release checklist now say 279 tests.
 - Tests: **279 passing** (`npm test`).
 
 ## 1.20.3 — review hardening

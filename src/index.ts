@@ -16,20 +16,13 @@
  *
  * @module dsh-skill-eval
  */
-import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { createAnalyzer } from './lib/report.ts'
 import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './lib/score.ts'
 import { createRecorder } from './lib/recorder.ts'
 import type { ResolveSkill } from './lib/recorder.ts'
-import { checkInProcessReport } from './lib/accept.ts'
-import { reviewSkillEdit } from './lib/critic.ts'
-import { buildLoopPlan, buildLoopPlans, renderLoopBatchMarkdown, renderLoopMarkdown } from './lib/loop.ts'
-import { buildDevReport, renderDevMarkdown } from './lib/dev.ts'
-import { buildHistory, buildImpact, renderHistoryMarkdown, renderImpactMarkdown } from './lib/history.ts'
-import { resolveDataDir } from './lib/store.ts'
-import { hashHex } from './lib/random.ts'
+import { manifestUrl, packageVersion, PLUGIN_VERSION } from './lib/version.ts'
 import {
   applySettings,
   FIELD_ZH,
@@ -41,49 +34,25 @@ import {
   SETTINGS_FIELDS,
   SETTINGS_FILE,
 } from './lib/settings.ts'
-import { renderValidityMarkdown } from './lib/validity.ts'
 import { createInspectProvider } from './lib/inspect.ts'
-import { createSnapshots, listTurnReports, renderTurnReportsMarkdown } from './lib/snapshot.ts'
+import { createSnapshots } from './lib/snapshot.ts'
+import { resolveDataDir } from './lib/store.ts'
+import { renderHtml, resolveLang } from './lib/render.ts'
 import {
-  renderHtml,
-  resolveLang,
-  renderMcpMarkdown,
-  renderRunsMarkdown,
-  renderSkillMarkdown,
-  renderStandardMarkdown,
-  renderSummaryMarkdown,
-} from './lib/render.ts'
-import type { Analyzer } from './lib/report.ts'
+  buildSettingsPayload,
+  createOriginGate,
+  effectiveWeightError,
+  normalizeBasePath,
+  readBody,
+  readJsonBody,
+  requestLang,
+  statusOf,
+} from './lib/http.ts'
+import { registerSkillEvalCommand } from './lib/command.ts'
+import { REPORT_OUTPUT, REPORT_PARAMETERS, runReport, runReview } from './lib/tools.ts'
 import type { Host, Json } from './lib/types.ts'
 
 export const name = 'skill-eval'
-
-/**
- * Emitted `index.js` sits next to package.json. `src/index.ts` is one directory
- * down. Either layout has to find the same manifest, or the versioned routes
- * never register.
- */
-function manifestUrl(): URL {
-  const beside = new URL('./package.json', import.meta.url)
-  return existsSync(beside) ? beside : new URL('../package.json', import.meta.url)
-}
-
-/**
- * The running package version. The data route is registered both canonically
- * and under this version, because a plugin reload cannot reclaim a route the
- * previous generation already registered: the versioned path is new on every
- * release, so a hot-reloaded plugin can still serve current data.
- */
-function packageVersion(): string | null {
-  try {
-    const parsed = JSON.parse(readFileSync(manifestUrl(), 'utf8'))
-    return typeof parsed.version === 'string' ? parsed.version : null
-  } catch {
-    return null
-  }
-}
-
-const PLUGIN_VERSION = packageVersion()
 
 /** Per-apply diagnostics surfaced by the `dev` view (the restart-skew detector). */
 const DIAGNOSTICS: {
@@ -155,6 +124,10 @@ export const Config = z.object({
       'how much a cached input token counts against the token budget (cache reads are near-free by default)',
     ),
   countTokens: z.boolean().default(true).description('attribute real provider usage to the open skill windows'),
+  redactCorrections: z
+    .boolean()
+    .default(false)
+    .description('store only a redacted placeholder for user correction text (privacy mode)'),
   editBudgetMax: z.natural().min(1).max(10).default(4).description('edits a first-round skill may change at once'),
   editBudgetMin: z.natural().min(1).max(10).default(1).description('edits allowed after the budget has annealed'),
   editBudgetHorizon: z
@@ -171,7 +144,7 @@ export const Config = z.object({
   pruneMinLoads: z
     .natural()
     .min(1)
-    .default(6)
+    .default(12)
     .description('loads required before a consistently low score becomes a prune recommendation'),
   pruneMaxScore: z
     .natural()
@@ -236,48 +209,17 @@ export const Config = z.object({
     .string()
     .default('/skill-eval')
     .description('path the dashboard is served on (change it when a reload could not reclaim the old route)'),
+  snapshots: z
+    .object({
+      latest: z.boolean().description('write reports/latest.md + latest.json after a turn settles'),
+      turns: z.boolean().description('write one board per settled turn under reports/turns/'),
+      keep: z.natural().min(1).max(500).description('how many per-turn boards to keep'),
+    })
+    .description('snapshot trio; when set, overrides reportOnTurnEnd, turnReports and turnReportsKeep'),
 })
 
 export type PluginConfig = Partial<ReturnType<typeof Config>>
 
-function statusOf(error: unknown): unknown {
-  return error && typeof error === 'object' ? (error as { statusCode?: unknown }).statusCode : undefined
-}
-
-const REPORT_PARAMETERS = {
-  type: 'object',
-  properties: {
-    skill: {
-      type: 'string',
-      description: 'report a single skill by name; omit for the cross-skill summary',
-    },
-    format: {
-      type: 'string',
-      enum: ['markdown', 'json'],
-      description: 'markdown (default) for humans and models, json for post-processing',
-    },
-    all: {
-      type: 'boolean',
-      description: 'with view:"loop": return the plan for every skill that has an actionable fix',
-    },
-    view: {
-      type: 'string',
-      enum: ['summary', 'mcp', 'runs', 'standard', 'loop', 'validity', 'history', 'impact', 'dev', 'turns'],
-      description:
-        'summary (default) scores every skill; mcp debugs MCP servers; runs lists recent sessions; standard shows the grading configuration; loop shows the next guided optimization step (add all:true for every actionable skill)',
-    },
-  },
-  additionalProperties: false,
-}
-
-const REPORT_OUTPUT = {
-  schema: { type: 'string', description: 'markdown or JSON report text' },
-  render(_args: unknown, value: unknown) {
-    return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]
-  },
-}
-
-/** Run a disposer without letting teardown failures escape into the host. */
 function safe(dispose: () => void): () => void {
   return () => {
     try {
@@ -307,189 +249,6 @@ function log(ctx: Host, level: 'info' | 'warn', message: string): void {
   }
 }
 
-const VIEWS = ['summary', 'mcp', 'runs', 'standard', 'loop', 'validity', 'history', 'impact', 'dev', 'turns']
-
-/** Read the files the acceptance check needs, best effort. */
-async function acceptanceFiles(
-  store: { dir: string },
-  readFile: (file: string, encoding: 'utf8') => Promise<string>,
-  snapshotDir = path.join(store.dir, 'reports'),
-) {
-  const dir = store.dir
-  const eventsPath = path.join(dir, 'events.jsonl')
-  const snapshotMarkdownPath = path.join(snapshotDir, 'latest.md')
-  const snapshotJsonPath = path.join(snapshotDir, 'latest.json')
-  let events: Json[] = []
-  try {
-    const raw = await readFile(eventsPath, 'utf8')
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      try {
-        events.push(JSON.parse(trimmed))
-      } catch {
-        // torn write
-      }
-    }
-  } catch {
-    events = []
-  }
-  const optional = async (file: string) => {
-    try {
-      return await readFile(file, 'utf8')
-    } catch {
-      return null
-    }
-  }
-  return {
-    eventsPath,
-    snapshotMarkdownPath,
-    snapshotJsonPath,
-    events,
-    snapshotText: await optional(snapshotMarkdownPath),
-    snapshotJsonText: await optional(snapshotJsonPath),
-  }
-}
-
-/** Read `?lang=` from a raw request URL without needing an origin. */
-function requestLang(req: Host): string | null {
-  const raw = typeof req?.url === 'string' ? req.url : ''
-  const index = raw.indexOf('?')
-  if (index === -1) return null
-  try {
-    return new URLSearchParams(raw.slice(index + 1)).get('lang')
-  } catch {
-    return null
-  }
-}
-
-function renderAcceptance(acceptance: ReturnType<typeof checkInProcessReport>): string {
-  const lines = ['## In-process acceptance', '']
-  for (const item of acceptance.results) {
-    const mark = item.skipped ? 'SKIP' : item.ok ? 'PASS' : 'FAIL'
-    lines.push(`- **${mark}** \`${item.id}\` — ${item.detail}`)
-  }
-  lines.push('', acceptance.summary)
-  return lines.join('\n')
-}
-
-interface ReportArgs {
-  view?: string
-  skill?: unknown
-  format?: string
-  all?: boolean
-}
-
-async function runReport(analyzer: Analyzer, args: ReportArgs, config: PluginConfig): Promise<string> {
-  const format = args?.format === 'json' ? 'json' : 'markdown'
-  const view = args?.view && VIEWS.includes(args.view) ? args.view : 'summary'
-  if (view === 'turns') {
-    const reportsDir = config.reportDir ? String(config.reportDir) : path.join(analyzer.store.dir, 'reports')
-    const rows = await listTurnReports(reportsDir)
-    return format === 'json' ? JSON.stringify({ turns: rows }, null, 2) : renderTurnReportsMarkdown(rows)
-  }
-  if (view === 'dev') {
-    const records = await analyzer.store.readAll()
-    const diskVersion = await import('node:fs/promises').then((fs) => fs.readFile(manifestUrl(), 'utf8'))
-    let parsedDiskVersion: string | null
-    try {
-      parsedDiskVersion = JSON.parse(diskVersion).version ?? null
-    } catch {
-      parsedDiskVersion = null
-    }
-    const dev = buildDevReport({
-      moduleVersion: PLUGIN_VERSION ?? null,
-      diskVersion: parsedDiskVersion,
-      dataDir: analyzer.store.dir,
-      settingsFile: DIAGNOSTICS.settingsFile,
-      settings: DIAGNOSTICS.settings,
-      settingsErrors: DIAGNOSTICS.settingsErrors,
-      config: config,
-      routes: DIAGNOSTICS.routes,
-      records,
-      store: { dir: analyzer.store.dir, failed: analyzer.store.failed, queued: analyzer.store.pending },
-      tools: DIAGNOSTICS.tools,
-      inspectProvider: DIAGNOSTICS.inspectProvider ? 'skill-eval' : null,
-      warnings: DIAGNOSTICS.warnings,
-    })
-    return format === 'json' ? JSON.stringify(dev, null, 2) : renderDevMarkdown(dev)
-  }
-  if (view === 'history' || view === 'impact') {
-    const skill = typeof args?.skill === 'string' ? args.skill : ''
-    if (!skill) return `view:"${view}" needs a skill name, e.g. {"view":"${view}","skill":"pdf-tools"}`
-    const records = await analyzer.store.readAll()
-    if (view === 'history') {
-      const history = buildHistory(records, skill)
-      return format === 'json' ? JSON.stringify(history, null, 2) : renderHistoryMarkdown(history)
-    }
-    const impact = buildImpact(records, skill)
-    return format === 'json' ? JSON.stringify(impact, null, 2) : renderImpactMarkdown(impact)
-  }
-  if (view === 'validity') {
-    const report = await analyzer.build()
-    return format === 'json' ? JSON.stringify(report.validity, null, 2) : renderValidityMarkdown(report.validity)
-  }
-  if (view === 'loop') {
-    const report = await analyzer.build()
-    if (args?.all === true || args?.skill === 'all') {
-      const plans = buildLoopPlans(report, {
-        editBudgetMax: config.editBudgetMax ?? 4,
-        reloads: report.scoring?.minSamples ?? 3,
-      })
-      return format === 'json' ? JSON.stringify({ plans }, null, 2) : renderLoopBatchMarkdown(plans)
-    }
-    const plan = buildLoopPlan(report, {
-      skill: typeof args?.skill === 'string' ? args.skill : undefined,
-      editBudgetMax: config.editBudgetMax ?? 4,
-      reloads: report.scoring?.minSamples ?? 3,
-    })
-    return format === 'json' ? JSON.stringify(plan, null, 2) : renderLoopMarkdown(plan)
-  }
-  if (view === 'mcp' || view === 'runs' || view === 'standard') {
-    const report = await analyzer.build()
-    if (format === 'json') {
-      return JSON.stringify(
-        view === 'mcp'
-          ? { mcpServers: report.mcpServers }
-          : view === 'runs'
-            ? { runs: report.runs }
-            : { scoring: report.scoring },
-        null,
-        2,
-      )
-    }
-    return view === 'mcp'
-      ? renderMcpMarkdown(report)
-      : view === 'runs'
-        ? renderRunsMarkdown(report)
-        : renderStandardMarkdown(report)
-  }
-  if (args?.skill) {
-    const entry = await analyzer.buildOne(String(args.skill))
-    if (!entry) {
-      const known = (await analyzer.build()).skills.map((s) => s.skill)
-      return `No evidence recorded for skill \`${args.skill}\`.\n\nSkills with recorded loads: ${
-        known.length > 0 ? known.map((n) => `\`${n}\``).join(', ') : '(none)'
-      }`
-    }
-    if (format === 'json') return JSON.stringify(entry, null, 2)
-    return renderSkillMarkdown({ ...entry, advice: entry.advice })
-  }
-  const report = await analyzer.build()
-  if (format === 'json') return JSON.stringify(report, null, 2)
-  return renderSummaryMarkdown({
-    ...report,
-    skills: report.skills.map((s) => ({ ...s, topAdvice: s.topAdvice.slice(0, config.maxAdvice ?? 3) })),
-  })
-}
-
-/**
- * Resolve one skill inside an agent scope.
- *
- * The catalog is layered: reads only include the user and project layers when
- * the agent is passed as `scope`, so a plain `skills.list()` misses exactly the
- * skills this plugin is measuring. `cwd` widens project-level discovery.
- */
 function makeResolveSkill(ctx: Host): ResolveSkill {
   return async (skillName, agent, signal) => {
     const attempts = [
@@ -526,6 +285,17 @@ export function apply(ctx: Host, config: PluginConfig): void {
   DIAGNOSTICS.warnings = []
   DIAGNOSTICS.inspectProvider = false
   let settingsDir: string | null = null
+  // Profile `snapshots: {latest, turns, keep}` is applied first so it can be
+  // declared in the host config; settings.json (flat keys or aliases) still
+  // wins, matching the rest of the form ("saved values apply immediately").
+  {
+    const trio = cfg.snapshots
+    if (trio && typeof trio === 'object') {
+      if (typeof trio.latest === 'boolean') cfg.reportOnTurnEnd = trio.latest
+      if (typeof trio.turns === 'boolean') cfg.turnReports = trio.turns
+      if (typeof trio.keep === 'number' && Number.isFinite(trio.keep)) cfg.turnReportsKeep = trio.keep
+    }
+  }
   // Diagnostics must show what was actually applied: a hand-edited value that
   // fails validation is dropped from the config, so it must not be reported as
   // saved (nor silently disappear without a warning).
@@ -550,6 +320,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
     log(ctx, 'warn', `skill-eval settings load failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 
+  if (cfg.pruneMinLoads === undefined) cfg.pruneMinLoads = 12
   const analyzer = createAnalyzer(ctx, cfg)
   ctx.effect(
     () => () => {
@@ -594,7 +365,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
     log: (message) => log(ctx, 'warn', message),
     enabled: () => cfg.reportOnTurnEnd !== false,
     turnReports: () => cfg.turnReports !== false,
-    turnReportsKeep: cfg.turnReportsKeep ?? 50,
+    turnReportsKeep: () => cfg.turnReportsKeep ?? 50,
   })
 
   if (snapshots) {
@@ -623,6 +394,12 @@ export function apply(ctx: Host, config: PluginConfig): void {
     )
   }
 
+  const reportDeps = () => ({
+    manifestUrl,
+    moduleVersion: PLUGIN_VERSION,
+    diagnostics: DIAGNOSTICS,
+  })
+
   if (cfg.registerTool !== false) {
     ctx.effect(() => {
       const disposers: Array<() => void> = []
@@ -634,9 +411,9 @@ export function apply(ctx: Host, config: PluginConfig): void {
             'Report recorded skill execution telemetry with a 0-100 score, an A-F grade and evidence-cited fixes. Use it when the user asks how a skill performed, why it is unreliable, or how to improve a skill. Every fix is backed by a recorded signal (failed loads, post-load tool errors, user corrections, ignored loads, sibling collisions, load latency) or a static authoring check.',
           parameters: REPORT_PARAMETERS,
           output: REPORT_OUTPUT,
-          async execute(args: ReportArgs | null | undefined) {
+          async execute(args: { view?: string; skill?: unknown; format?: string; all?: boolean } | null | undefined) {
             try {
-              return await runReport(analyzer, args ?? {}, cfg)
+              return await runReport(analyzer, args ?? {}, cfg, reportDeps())
             } catch (error) {
               return `skill_eval_report failed: ${error instanceof Error ? error.message : String(error)}`
             }
@@ -678,31 +455,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
           },
         },
         async execute(args: Json) {
-          try {
-            const verdict = reviewSkillEdit({
-              skill: String(args?.skill ?? ''),
-              hypothesis: typeof args?.hypothesis === 'string' ? args.hypothesis : undefined,
-              diff: typeof args?.diff === 'string' ? args.diff : undefined,
-            })
-            await analyzer.store.append({
-              t: 'edit',
-              v: 1,
-              at: Date.now(),
-              skill: String(args?.skill ?? ''),
-              hypothesis: typeof args?.hypothesis === 'string' ? args.hypothesis.slice(0, 500) : '',
-              verdict: verdict.verdict,
-              dimension: typeof args?.dimension === 'string' ? args.dimension : null,
-              reasons: verdict.reasons.map((reason) => reason.code),
-              diffHash: typeof args?.diff === 'string' ? hashHex(args.diff) : null,
-            })
-            const lines = [`skill_eval_review: **${verdict.verdict}** for \`${args?.skill ?? ''}\``]
-            if (verdict.reasons.length === 0) lines.push('no leakage signals found')
-            for (const reason of verdict.reasons)
-              lines.push(`- [${reason.severity}] ${reason.code}: ${reason.label} — ${reason.detail}`)
-            return lines.join('\n')
-          } catch (error) {
-            return `skill_eval_review failed: ${error instanceof Error ? error.message : String(error)}`
-          }
+          return runReview(analyzer, args)
         },
       })
       return () => safe(dispose)
@@ -710,124 +463,33 @@ export function apply(ctx: Host, config: PluginConfig): void {
   }
 
   if (cfg.registerCommand !== false) {
-    ctx.inject(['commands'], (c: Host) => {
-      c.effect(() => {
-        const dispose = c.commands.register({
-          name: 'skill-eval',
-          description: 'show the skill execution report (scores, grades and cited fixes)',
-          input: { hint: '[skill-name]' },
-          async handler(invocation: Host) {
-            const target = String(invocation.rawInput ?? '').trim()
-            try {
-              const keyword = target.toLowerCase()
-              if (keyword === 'accept' || keyword === 'doctor') {
-                const report = await analyzer.build()
-                const files = await acceptanceFiles(
-                  analyzer.store,
-                  (file: string) => import('node:fs/promises').then((fs) => fs.readFile(file, 'utf8')),
-                  cfg.reportDir ? String(cfg.reportDir) : path.join(analyzer.store.dir, 'reports'),
-                )
-                const acceptance = checkInProcessReport(report, { version: PLUGIN_VERSION ?? 'unknown', files })
-                return { kind: 'success', text: '\n' + renderAcceptance(acceptance) + '\n' }
-              }
-              if (keyword.startsWith('history ') || keyword.startsWith('impact ')) {
-                const view = keyword.split(' ')[0]
-                const skill = target.slice(view.length + 1).trim()
-                const text = await runReport(analyzer, { view, skill }, cfg)
-                return { kind: 'success', text: `\n${text}\n` }
-              }
-              if (keyword === 'config') {
-                const lines = [
-                  '## 配置 / effective settings',
-                  '',
-                  `override file: \`${path.join(settingsDir ?? '<unknown>', SETTINGS_FILE)}\``,
-                  '',
-                ]
-                for (const field of SETTINGS_KEYS) {
-                  const value = field
-                    .split('.')
-                    .reduce<unknown>((target, key) => (target == null ? undefined : (target as Json)[key]), cfg)
-                  lines.push(`- \`${field}\`: **${value === undefined ? '—' : String(value)}**`)
-                }
-                lines.push('', '浏览器里打开 `<dashboardPath>/config` 可直接修改（保存后立即生效）。')
-                return { kind: 'success', text: `\n${lines.join('\n')}\n` }
-              }
-              if (keyword === 'turns' || keyword === 'boards') {
-                const text = await runReport(analyzer, { view: 'turns' }, cfg)
-                return { kind: 'success', text: `\n${text}\n` }
-              }
-              if (keyword === 'dev' || keyword === 'diagnostics') {
-                const text = await runReport(analyzer, { view: 'dev' }, cfg)
-                return { kind: 'success', text: `\n${text}\n` }
-              }
-              if (keyword === 'validity' || keyword === 'valid') {
-                const text = await runReport(analyzer, { view: 'validity' }, cfg)
-                return { kind: 'success', text: `\n${text}\n` }
-              }
-              if (keyword === 'loop' || keyword.startsWith('loop ')) {
-                const rest = keyword.startsWith('loop ') ? target.slice(5).trim() : ''
-                if (rest === 'all') {
-                  const text = await runReport(analyzer, { view: 'loop', all: true }, cfg)
-                  return { kind: 'success', text: `\n${text}\n` }
-                }
-                const text = await runReport(analyzer, { view: 'loop', skill: rest || undefined }, cfg)
-                return { kind: 'success', text: `\n${text}\n` }
-              }
-              const view = ['mcp', 'runs', 'standard'].includes(keyword) ? keyword : undefined
-              const text = await runReport(analyzer, view ? { view } : { skill: target || undefined }, cfg)
-              return { kind: 'success', text: `\n${text}\n` }
-            } catch (error) {
-              return {
-                kind: 'error',
-                text: `skill-eval failed: ${error instanceof Error ? error.message : String(error)}`,
-              }
-            }
-          },
-        })
-        return () => safe(dispose)
-      }, 'skill-eval: command')
-    })
+    registerSkillEvalCommand(ctx, analyzer, cfg as Record<string, unknown>, () => ({
+      reportDir: cfg.reportDir,
+      settingsDir,
+      settingsKeys: SETTINGS_FIELDS.map((field) => field.key),
+      manifestUrl,
+      moduleVersion: PLUGIN_VERSION,
+      diagnostics: DIAGNOSTICS,
+    }))
   }
 
   if (cfg.webDashboard !== false) {
-    const base = String(cfg.dashboardPath || '/skill-eval').replace(/\/$/, '')
+    const base = normalizeBasePath(cfg.dashboardPath, '/skill-eval', (message) => log(ctx, 'warn', message))
     // The client bundle ships a fixed route contract: data/settings stay under
     // /skill-eval even when the *pages* move, otherwise a custom dashboardPath
-    // silently breaks the panel and the native config form.
+    // silently breaks the panel and the native config form. Both canonical and
+    // custom-base aliases are registered below so either URL works.
     const clientBase = '/skill-eval'
     const dataPath = `${clientBase}/data`
 
-    // Writes are same-origin fenced. Comparing Origin to Host alone does not
-    // stop DNS rebinding (both are the attacker's domain after rebinding), so
-    // the Host itself must be the server's own origin or a loopback name.
-    let serverOrigin: string | null = null
-    const hostnameOf = (value: unknown) => {
-      try {
-        return new URL(String(value).includes('://') ? String(value) : 'http://' + String(value)).hostname.toLowerCase()
-      } catch {
-        return ''
-      }
-    }
-    const allowedWriteHosts = () => {
-      const hosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
-      const own = serverOrigin ? hostnameOf(serverOrigin) : ''
-      if (own) hosts.add(own)
-      return hosts
-    }
-    const rememberOrigin = (webServer: Host) => {
-      try {
-        const value = webServer.getOrigin()
-        if (typeof value === 'string' && value) serverOrigin = value
-      } catch {
-        // keep the loopback fallback
-      }
-    }
+    const gate = createOriginGate()
     ctx.inject(['webServer'], (c: Host) => {
       c.effect(() => {
-        rememberOrigin(c.webServer)
+        gate.rememberOrigin(c.webServer)
         return () => {}
       }, 'skill-eval: origin')
     })
+    const { trustedWrite, trustedRead } = gate
 
     // The board's dev tab shows what the agent's `view:"dev"` report shows in
     // short form: which generation is loaded, whether the package on disk moved
@@ -847,7 +509,12 @@ export function apply(ctx: Host, config: PluginConfig): void {
       }
     }
 
-    const writeReport = async (res: Host) => {
+    const writeReport = async (req: Host, res: Host) => {
+      if (!trustedRead(req)) {
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('cross-site report read rejected')
+        return
+      }
       const report = await analyzer.build()
       res.writeHead(200, {
         'content-type': 'application/json; charset=utf-8',
@@ -861,65 +528,13 @@ export function apply(ctx: Host, config: PluginConfig): void {
       res.end(JSON.stringify({ ...report, dev: diagnosticsPayload(), pages }, null, 2))
     }
 
-    const bodyTooLarge = () => Object.assign(new Error('request body too large'), { statusCode: 413 })
-    const readBody = (req: Host, limit = 64 * 1024) =>
-      new Promise<string>((resolve, reject) => {
-        const declared = Number(req.headers?.['content-length'])
-        if (Number.isFinite(declared) && declared > limit) {
-          reject(bodyTooLarge())
-          return
-        }
-        let body = ''
-        let size = 0
-        let settled = false
-        const fail = (error: unknown) => {
-          if (settled) return
-          settled = true
-          reject(error)
-          if (typeof req.resume === 'function') req.resume()
-        }
-        if (typeof req.setEncoding === 'function') req.setEncoding('utf8')
-        req.on('data', (chunk: string) => {
-          if (settled) return
-          size += Buffer.byteLength(chunk)
-          if (size > limit) {
-            fail(bodyTooLarge())
-            return
-          }
-          body += chunk
-        })
-        req.on('end', () => {
-          if (settled) return
-          settled = true
-          resolve(body)
-        })
-        req.on('error', (error: unknown) => fail(error))
-      })
-
-    // Plugin routes bypass the host's own trust fence, so settings writes get a
-    // minimal same-origin gate here: reject cross-site fetch metadata, reject a
-    // mismatched Origin, and require a custom header on the JSON API (which a
-    // cross-site simple request cannot send without a preflight it would fail).
-    const trustedWrite = (req: Host, { requireHeader = false }: { requireHeader?: boolean } = {}) => {
-      const site = String(req.headers?.['sec-fetch-site'] ?? '').toLowerCase()
-      if (site === 'cross-site') return false
-      const host = String(req.headers?.['host'] ?? '')
-      if (!allowedWriteHosts().has(hostnameOf(host))) return false
-      const origin = req.headers?.origin
-      if (origin) {
-        try {
-          const parsed = new URL(origin)
-          if (parsed.host !== host) return false
-        } catch {
-          return false
-        }
-      }
-      if (requireHeader && req.headers?.['x-skill-eval-config'] !== '1') return false
-      return true
-    }
-
     const servePageAt = (pageBase: string) => async (req: Host, res: Host) => {
       try {
+        if (!trustedRead(req)) {
+          res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('cross-site board read rejected')
+          return
+        }
         const report = await analyzer.build()
         const lang = resolveLang(req.headers?.['accept-language'], requestLang(req))
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
@@ -946,7 +561,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
           const body = await readBody(req)
           const submitted = parseFormSettings(body)
           const { values, errors } = normalizeSettings(submitted)
-          const weightError = effectiveWeightError(values)
+          const weightError = effectiveWeightError(values, (cfg.weights ?? {}) as Record<string, unknown>)
           if (weightError) errors.push(weightError)
           if (errors.length > 0) {
             send(400, renderConfigHtml({ config: cfg, base: pageBase, errors, lang }))
@@ -980,41 +595,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
     // routes registered by a previous instance). The versioned alias is new on
     // every release, so even a hot reload that cannot reclaim `dataPath` gets a
     // working URL for the current generation.
-    const effectiveWeightError = (values: Record<string, unknown>) => {
-      const weights: Record<string, unknown> = { ...(cfg.weights ?? {}) }
-      for (const [key, value] of Object.entries(values ?? {})) {
-        if (key.startsWith('weights.')) weights[key.slice('weights.'.length)] = value
-      }
-      const sum = ['static', 'reliability', 'effectiveness', 'efficiency'].reduce(
-        (total, dimension) => total + (Number(weights[dimension]) || 0),
-        0,
-      )
-      return sum > 0 ? null : { key: 'weights.total', message: 'weights sum must be positive' }
-    }
-    const settingsValue = (key: string) => {
-      const [head, leaf] = key.split('.')
-      const top = (cfg as Json)?.[head]
-      const raw = leaf ? top?.[leaf] : top
-      return raw === undefined ? null : raw
-    }
-    const settingsPayload = () => ({
-      fields: SETTINGS_FIELDS.map((field) => ({
-        ...field,
-        labelZh: FIELD_ZH[field.key] ?? field.label,
-        value: settingsValue(field.key),
-      })),
-      values: Object.fromEntries(SETTINGS_FIELDS.map((field) => [field.key, settingsValue(field.key)])),
-      version: PLUGIN_VERSION ?? null,
-    })
-    const readJsonBody = async (req: Host) => {
-      const raw = await readBody(req)
-      if (!raw) return {}
-      try {
-        return JSON.parse(raw)
-      } catch {
-        return Object.fromEntries(new URLSearchParams(raw))
-      }
-    }
+    const settingsPayload = () => buildSettingsPayload(SETTINGS_FIELDS, FIELD_ZH, cfg as Json, PLUGIN_VERSION)
     const handleSettingsApi = async (req: Host, res: Host) => {
       const send = (status: number, payload: unknown) => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -1028,7 +609,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
           }
           const body = await readJsonBody(req)
           const { values, errors } = normalizeSettings(body)
-          const weightError = effectiveWeightError(values)
+          const weightError = effectiveWeightError(values, (cfg.weights ?? {}) as Record<string, unknown>)
           if (weightError) errors.push(weightError)
           if (errors.length > 0) {
             send(400, { saved: false, errors, values: settingsPayload().values })
@@ -1051,13 +632,22 @@ export function apply(ctx: Host, config: PluginConfig): void {
       }
     }
 
-    const dataPaths = PLUGIN_VERSION ? [`${dataPath}/${PLUGIN_VERSION}`, dataPath] : [dataPath]
+    // The JSON API is registered under the canonical base (the client bundle
+    // fetches it there) and mirrored under a custom dashboardPath so a moved
+    // board keeps working when the canonical route is owned by an older
+    // generation. The prefix handler below also answers `/data` + `/settings`
+    // suffixes under the custom base.
+    const mirror = (p: string) =>
+      base !== clientBase ? [`${base}${p}`, ...(PLUGIN_VERSION ? [`${base}${p}/${PLUGIN_VERSION}`] : [])] : []
+    const dataPaths = [...(PLUGIN_VERSION ? [`${dataPath}/${PLUGIN_VERSION}`] : []), dataPath, ...mirror('/data')]
 
     // Settings API: the native plugin-config page renders this instead of the
     // standalone HTML form. Versioned alias for the same hot-reload reason.
-    const settingsPaths = PLUGIN_VERSION
-      ? [`${clientBase}/settings/${PLUGIN_VERSION}`, `${clientBase}/settings`]
-      : [`${clientBase}/settings`]
+    const settingsPaths = [
+      ...(PLUGIN_VERSION ? [`${clientBase}/settings/${PLUGIN_VERSION}`] : []),
+      `${clientBase}/settings`,
+      ...mirror('/settings'),
+    ]
     for (const routePath of settingsPaths)
       ctx.inject(['webServer'], (c: Host) => {
         c.effect(() => {
@@ -1086,7 +676,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
               path: routePath,
               async handler(req: Host, res: Host) {
                 try {
-                  await writeReport(res)
+                  await writeReport(req, res)
                 } catch (error) {
                   log(ctx, 'warn', `data failed: ${error instanceof Error ? error.message : String(error)}`)
                   res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
@@ -1169,7 +759,7 @@ export function apply(ctx: Host, config: PluginConfig): void {
               const url = new URL(req.url ?? base, origin)
               try {
                 if (url.pathname.replace(/\/$/, '').endsWith('/data')) {
-                  await writeReport(res)
+                  await writeReport(req, res)
                   return
                 }
                 if (url.pathname.replace(/\/$/, '').endsWith('/config')) {
@@ -1218,8 +808,6 @@ export function apply(ctx: Host, config: PluginConfig): void {
       }, 'skill-eval: inspect provider')
     })
   }
-
-  const SETTINGS_KEYS = SETTINGS_FIELDS.map((field) => field.key)
 
   ctx.inject(['systemPrompt'], (c: Host) => {
     c.effect(() => {

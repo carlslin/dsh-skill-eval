@@ -295,9 +295,10 @@ async function mountClient(options: Fake = {}, overrides: Fake = {}) {
   ;(globalThis as Fake).IS_REACT_ACT_ENVIRONMENT = true
 
   const fetched: string[] = []
-  globalThis.fetch = (async (url: RequestInfo | URL) => {
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const target = String(url)
     fetched.push(target)
+    const method = String((init && init.method) || 'GET').toUpperCase()
     if (options.failFetch) throw new Error('boom')
     if (options.versionedMissing && !target.endsWith('/data')) {
       return {
@@ -326,6 +327,18 @@ async function mountClient(options: Fake = {}, overrides: Fake = {}) {
           headers: { get: () => 'text/html; charset=utf-8' },
           async json() {
             return null
+          },
+        }
+      }
+      if (method === 'POST') {
+        const submitted = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+        const current = options.settings ?? SETTINGS_FIXTURE
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          async json() {
+            return { saved: true, values: { ...current.values, ...submitted } }
           },
         }
       }
@@ -1237,4 +1250,213 @@ test('the new client still renders the older host payload shipped by 1.10.x', as
     configRoot.render(React.createElement(RowConfig, { view: 'summary' }))
   })
   assert.match(configHost.textContent, /评分权重/)
+})
+
+test('the native Chinese settings form localizes boards and calls units', async () => {
+  const settings = {
+    fields: [
+      {
+        key: 'windowToolCalls',
+        label: 'window evidence limit (tool calls)',
+        labelZh: '窗口证据上限（调用数）',
+        type: 'number',
+        unit: 'calls',
+        value: 12,
+      },
+      {
+        key: 'turnReportsKeep',
+        label: 'per-turn boards to keep',
+        labelZh: '看板保留数',
+        type: 'number',
+        unit: 'boards',
+        value: 50,
+      },
+    ],
+    values: { windowToolCalls: 12, turnReportsKeep: 50 },
+  }
+  const { window, registrations, React } = await mountClient({ settings })
+  const Config = registrations.find((item) => item.registration.name === 'plugins.bundle.config').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(Config, { view: 'page' }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const units = [...host.querySelectorAll('.sev-settings-control em')].map((node) => node.textContent)
+  assert.deepEqual(units.sort(), ['块看板', '次调用'])
+})
+
+test('a successful native settings save keeps the confirmation visible in the action footer', async () => {
+  const { window, registrations, React } = await mountClient()
+  const Config = registrations.find((item) => item.registration.name === 'plugins.bundle.config').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(Config, { view: 'page' }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const save = [...host.querySelectorAll('button')].find((node) => /保存|Save/.test(node.textContent ?? ''))
+  assert.ok(save, 'save button exists')
+  await act(async () => {
+    save.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const status = host.querySelector('.sev-settings-status')
+  assert.ok(status, 'success status is rendered')
+  assert.match(status.textContent ?? '', /已保存并立即生效/)
+  assert.equal(status.getAttribute('aria-live'), 'polite')
+  const footer = host.querySelector('.sev-settings-footer')
+  assert.ok(footer, 'actions live in a dedicated footer')
+  assert.ok(footer.contains(status))
+  assert.ok(footer.contains(save))
+  assert.equal(
+    Boolean(status.compareDocumentPosition(save) & window.Node.DOCUMENT_POSITION_FOLLOWING),
+    true,
+    'status sits above the save button so a tight modal still shows it',
+  )
+  const css = [...host.querySelectorAll('style')].map((node) => node.textContent).join('\n')
+  assert.match(css, /\.sev-settings-footer[^}]*position:\s*sticky/)
+  assert.match(css, /\.sev-settings-footer[^}]*padding-bottom/)
+})
+
+test('a versioned settings POST that answers HTML falls back to the canonical save', async () => {
+  const { window, registrations, React, fetched } = await mountClient({ settingsVersionedHtml: true })
+  const Config = registrations.find((item) => item.registration.name === 'plugins.bundle.config').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(React.createElement(Config, { view: 'page' }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  })
+  const save = [...host.querySelectorAll('button')].find((node) => /保存|Save/.test(node.textContent ?? ''))
+  assert.ok(save, 'save button exists')
+  await act(async () => {
+    save.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60))
+  })
+  const status = host.querySelector('.sev-settings-status')
+  assert.ok(status, 'save status is rendered')
+  assert.match(status.textContent ?? '', /已保存|Saved/)
+  assert.equal(fetched.includes('/skill-eval/settings'), true, 'canonical save route was retried')
+  assert.doesNotMatch(host.textContent ?? '', /Unexpected token|host-too-old/)
+})
+
+test('view-steps drill-down uses stepTurns and an honest empty state, not a generic blank', async () => {
+  const stepOf = (over: Fake) => ({
+    at: 100,
+    sessionId: 's',
+    turn: 1,
+    step: 1,
+    durationMs: 100,
+    toolCalls: 1,
+    errors: 0,
+    skills: [],
+    score: { total: 100, grade: 'A', penalties: [] },
+    tokens: { input: 1, output: 1, cacheRead: 0, calls: 1 },
+    ...over,
+  })
+  const recent = stepOf({ at: 400, turn: 4, step: 1, skills: [] })
+  const skillStep = stepOf({ at: 100, turn: 2, step: 1, skills: ['karpathy-guidelines'] })
+  const skill = (name: string) => ({ ...REPORT.skills[0], skill: name })
+  const report = {
+    ...REPORT,
+    skills: [skill('orca-computer-use'), skill('karpathy-guidelines')],
+    turnLoads: [
+      { sessionId: 's', turn: 2, skills: ['karpathy-guidelines'], firstAt: 1, lastAt: 2 },
+      { sessionId: 'old', turn: 60, skills: ['orca-computer-use'], firstAt: 1, lastAt: 2 },
+    ],
+    // Tighter flat window than stepTurns, reproducing the live 400-vs-800 mismatch.
+    steps: [recent],
+    stepTurns: [
+      {
+        sessionId: 's',
+        turn: 4,
+        lastAt: 400,
+        steps: [recent],
+        skills: [],
+        average: 100,
+        best: 100,
+        worst: 100,
+      },
+      {
+        sessionId: 's',
+        turn: 2,
+        lastAt: 100,
+        steps: [skillStep],
+        skills: ['karpathy-guidelines'],
+        average: 100,
+        best: 100,
+        worst: 100,
+      },
+    ],
+    ranking: { significant: false, ties: [], note: '' },
+    edits: [],
+  }
+  const { window, registrations, React } = await mountClient({ report })
+  const Panel = registrations.find((item) => item.registration.name === 'main').Component
+  const { host, root } = createHost(window, { height: '600px' })
+  await act(async () => {
+    root.render(React.createElement(Panel))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const cardTrace = (name: string) => {
+    const card = [...host.querySelectorAll('.sev-card')].find((node) => node.textContent?.includes(name))
+    assert.ok(card, `skill card for ${name}`)
+    const button = card.querySelector('.sev-trace')
+    assert.ok(button, `trace button for ${name}`)
+    return button
+  }
+  await act(async () => {
+    cardTrace('orca-computer-use').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  assert.ok(host.querySelector('.sev-steps'))
+  assert.match(host.textContent ?? '', /orca-computer-use/)
+  assert.equal(host.textContent?.includes('还没有逐步遥测'), false, 'must not use the generic empty state')
+  const chips = [...host.querySelectorAll('.sev-step-filters .sev-chip')].map((node) => node.textContent)
+  assert.ok(chips.includes('全部'))
+  assert.ok(chips.includes('orca-computer-use'))
+  const all = [...host.querySelectorAll('.sev-step-filters .sev-chip')].find((node) => node.textContent === '全部')
+  await act(async () => {
+    assert.ok(all)
+    all.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  assert.ok(host.querySelectorAll('.sev-turn').length >= 1, 'all restores existing trajectory')
+  const karpathy = [...host.querySelectorAll('.sev-step-filters .sev-chip')].find(
+    (node) => node.textContent === 'karpathy-guidelines',
+  )
+  assert.ok(karpathy, 'skill present in the turn window appears as a chip')
+  await act(async () => {
+    karpathy.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  assert.equal(host.querySelectorAll('.sev-turn').length, 1, 'drill-down finds the skill step kept only on stepTurns')
+  assert.equal(host.textContent?.includes('还没有逐步遥测'), false)
+})
+
+test('the turn strip stays hidden for a completed historical turn that never loaded a skill', async () => {
+  const report = { ...REPORT, turnLoads: [] }
+  const { window, registrations, React } = await mountClient({ report })
+  const TurnCard = registrations.find((item) => item.registration.name === 'conversation.chat.turnTail').Component
+  const { host, root } = createHost(window)
+  await act(async () => {
+    root.render(
+      React.createElement(TurnCard, {
+        sessionId: 'session-350bc3b8-1744-4be7-9f84-84d2e8238bac',
+        turn: { turn: 4, status: 'closed' },
+      }),
+    )
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  })
+  assert.equal(host.querySelector('.sev-turn'), null)
+  assert.equal(host.textContent.includes('技能评测'), false)
 })

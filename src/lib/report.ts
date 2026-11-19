@@ -1,12 +1,20 @@
 import { EventStore, resolveDataDir, foldSamples } from './store.ts'
-import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, aggregate, gradeOf, scoreSkill, staticProfile } from './score.ts'
+import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, aggregate, scoreSkill, staticProfile } from './score.ts'
+import { EDIT_DIMENSIONS } from './dimensions.ts'
+import { bootstrapCI, type Interval95 } from './stats.ts'
+import { buildLoopPlans } from './loop.ts'
+import type { LoopPlans } from './loop.ts'
+import { mcpServers, runsOf, scoreRun, turnLoads, type Run, type RunScore } from './runs.ts'
 import { buildAdvice, buildMcpAdvice, topAdvice } from './advice.ts'
 import { buildValidity } from './validity.ts'
-import { buildSteps, summarizeSteps } from './steps.ts'
-import { hashSeed, mulberry32 } from './random.ts'
+import { buildSteps, summarizeSteps, type Step } from './steps.ts'
+import { hashSeed } from './random.ts'
 import type { FoldedSample } from './store.ts'
-import type { Stats } from './score.ts'
 import type { Host, StoredRecord, Thresholds, Weights } from './types.ts'
+
+export { bootstrapCI, type Interval95 }
+export type { Run, RunScore }
+export { mcpServers, runsOf, scoreRun, turnLoads }
 
 /** Settings the analyzer reads; every field is optional and defaulted below. */
 export interface AnalyzerConfig {
@@ -31,50 +39,6 @@ export interface AnalyzerConfig {
   mcpToolP95Ms?: number
 }
 
-export interface Interval95 {
-  level: number
-  low: number
-  high: number
-  resamples: number
-}
-
-const finite = (value: unknown, fallback: number) =>
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-
-/**
- * Bootstrap 95% interval over the recorded loads.
- *
- * The score is a point estimate over a handful of runs, so "88" and "88 ± 9"
- * are very different claims. Resampling the loads (with replacement) and
- * re-scoring gives an honest interval without assuming a distribution.
- */
-export function bootstrapCI<T>(
-  samples: readonly T[] | null | undefined,
-  compute: (draw: T[]) => unknown,
-  options: { resamples?: number; seed?: number; level?: number } = {},
-): Interval95 | null {
-  const resamples = finite(options.resamples, 200)
-  const seed = finite(options.seed, 1)
-  if (!Array.isArray(samples) || samples.length < 2 || resamples <= 0) return null
-  const random = mulberry32(seed)
-  const totals: number[] = []
-  for (let i = 0; i < resamples; i += 1) {
-    const draw: T[] = []
-    for (let j = 0; j < samples.length; j += 1) draw.push(samples[Math.floor(random() * samples.length)])
-    const value = compute(draw)
-    if (typeof value === 'number' && Number.isFinite(value)) totals.push(value)
-  }
-  if (totals.length < 20) return null
-  totals.sort((a, b) => a - b)
-  const at = (p: number) => totals[Math.min(totals.length - 1, Math.max(0, Math.round(p * (totals.length - 1))))]
-  return {
-    level: options.level ?? 0.95,
-    low: Math.round(at(0.025) * 10) / 10,
-    high: Math.round(at(0.975) * 10) / 10,
-    resamples: totals.length,
-  }
-}
-
 interface Rankable {
   skill: string
   score?: { total?: number | null; ci?: { low: number; high: number } | null } | null
@@ -90,7 +54,9 @@ export interface Ranking {
 /**
  * Two skills whose intervals overlap are not ordered by the data. Reporting a
  * rank without saying that is how a "top fix" list turns into a wild goose
- * chase, so the report carries an explicit ranking note.
+ * chase, so the report carries an explicit ranking note. Overlap alone decides
+ * significance — the point-estimate gap only affects the wording, never the
+ * verdict.
  */
 export function rankingOf(entries: readonly (Rankable | null)[] | null | undefined): Ranking {
   const scored = (entries ?? []).filter(
@@ -101,13 +67,16 @@ export function rankingOf(entries: readonly (Rankable | null)[] | null | undefin
   // significant ranking here would be a fabricated statistic.
   if (scored.length < 2)
     return { significant: null, note: 'not enough scored skills with 95% intervals to rank them', ties: [] }
+  // Sort defensively: callers normally pre-sort, but significance must not
+  // depend on input order. Only adjacent pairs in total-order need checking —
+  // non-adjacent overlap always implies an adjacent overlap in between.
+  const ordered = [...scored].sort((a, b) => (b.score.total ?? 0) - (a.score.total ?? 0))
   const ties: Ranking['ties'] = []
-  for (let i = 1; i < scored.length; i += 1) {
-    const a = scored[i - 1]
-    const b = scored[i]
+  for (let i = 1; i < ordered.length; i += 1) {
+    const a = ordered[i - 1]
+    const b = ordered[i]
     const overlap = a.score.ci.low <= b.score.ci.high && b.score.ci.low <= a.score.ci.high
-    const close = Math.abs(a.score.total - b.score.total) <= 10
-    if (overlap && close) ties.push({ a: a.skill, b: b.skill, aTotal: a.score.total, bTotal: b.score.total })
+    if (overlap) ties.push({ a: a.skill, b: b.skill, aTotal: a.score.total, bTotal: b.score.total })
   }
   if (ties.length === 0) return { significant: true, note: null, ties: [] }
   const first = ties[0]
@@ -119,7 +88,8 @@ export function rankingOf(entries: readonly (Rankable | null)[] | null | undefin
   }
 }
 
-export const EDIT_DIMENSIONS: string[] = ['static', 'reliability', 'effectiveness', 'efficiency', 'mcp', 'lifecycle']
+/** @deprecated import via ./dimensions instead; kept for compatibility. */
+export { EDIT_DIMENSIONS }
 
 /**
  * RRSI's annealed edit budget: early iterations may carry a bundle of edits,
@@ -184,28 +154,31 @@ export function normalizeWeights(input: unknown = {}): Weights {
 }
 
 /**
- * Display weights as integers that always sum to 100. Independent rounding can
- * show 29+29+29+14=101 for a legal 2/2/2/1 configuration, which then fails the
- * release check; largest-remainder keeps the displayed total honest.
+ * Display weights as integers that always sum to exactly 100. Independent
+ * rounding can show 29+29+29+14=101 for a legal 2/2/2/1 configuration, which
+ * then fails the release check; largest-remainder keeps the displayed total
+ * honest. Unnormalized or all-zero input is normalized first (zeros stay zero).
  */
 export function percentWeights(weights: Record<string, unknown> | null | undefined): Record<string, number> {
   const keys = Object.keys(weights ?? {})
   if (keys.length === 0) return {}
-  const exact = keys.map((key) => Math.max(0, Number(weights?.[key]) || 0) * 100)
+  const raws = keys.map((key) => {
+    const n = Number(weights?.[key])
+    return Number.isFinite(n) && n > 0 ? n : 0
+  })
+  const total = raws.reduce((sum, value) => sum + value, 0)
+  if (!(total > 0)) return Object.fromEntries(keys.map((key) => [key, 0]))
+  // Scale to a 100-point pie first so over/under-weight input still sums to 100.
+  const exact = raws.map((value) => (value / total) * 100)
   const base = exact.map((value) => Math.floor(value))
   let remainder = 100 - base.reduce((sum, value) => sum + value, 0)
   const order = exact
     .map((value, index) => ({ index, frac: value - Math.floor(value) }))
     .sort((a, b) => b.frac - a.frac)
+  // remainder is in [0, keys.length) after scaling, so one pass always suffices.
   for (const item of order) {
     if (remainder <= 0) break
     base[item.index] += 1
-    remainder -= 1
-  }
-  while (remainder > 0) {
-    let largest = 0
-    for (let i = 1; i < base.length; i += 1) if (base[i] > base[largest]) largest = i
-    base[largest] += 1
     remainder -= 1
   }
   return Object.fromEntries(keys.map((key, index) => [key, base[index]]))
@@ -255,32 +228,6 @@ export interface StaticQuality {
   score?: number | null
   capturedAt?: number
   origin?: string
-}
-
-export interface Run {
-  sessionId: string
-  firstAt: number | null
-  lastAt: number | null
-  loads: number
-  closed: number
-  toolCalls: number
-  errors: number
-  corrections: number
-  mcpCalls: number
-  mcpErrors: number
-  tokens: number
-  loopErrors: number
-  skills: string[]
-  score: RunScore | null
-}
-
-export interface RunScore {
-  total: number | null
-  grade: string
-  confidence: string
-  provisional: boolean
-  dimensions: Record<string, number | null>
-  ci: Interval95 | null
 }
 
 /**
@@ -441,6 +388,12 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         resamples: config.ciResamples ?? 200,
         seed: hashSeed(group.skill),
       })
+      // Percentile intervals can exclude the point estimate under skew (mean vs
+      // median). Expand defensively so the board never shows "88 ± [90,95]".
+      if (score.ci && typeof score.total === 'number') {
+        score.ci.low = Math.min(score.ci.low, Math.floor(score.total * 10) / 10)
+        score.ci.high = Math.max(score.ci.high, Math.ceil(score.total * 10) / 10)
+      }
       // Last few per-load scores for the panel sparkline. One sample is scored
       // with the same options as the aggregate; capped so the payload stays small.
       const trend = group.samples
@@ -464,7 +417,7 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         windows,
         gating: config.adviceNoiseFloor !== false,
         tokenBudgetPerLoad: config.tokenBudgetPerLoad ?? 20000,
-        pruneMinLoads: config.pruneMinLoads ?? 6,
+        pruneMinLoads: config.pruneMinLoads ?? 12,
         pruneMaxScore: config.pruneMaxScore ?? 60,
       })
       const skillEdits = editsChronological.filter((record) => record.skill === group.skill)
@@ -504,6 +457,17 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
 
     const stepLog = buildSteps(records, { thresholds, limit: 800 })
     const stepView = summarizeSteps(stepLog, { limit: 12 })
+    const seenSteps = new Set<string>()
+    const visibleSteps: Step[] = []
+    for (const turn of stepView.turns) {
+      for (const step of turn.steps) {
+        const key = `${step.sessionId}#${step.turn}#${step.step}#${step.at}`
+        if (seenSteps.has(key)) continue
+        seenSteps.add(key)
+        visibleSteps.push(step)
+      }
+    }
+    visibleSteps.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     const report = {
       generatedAt: new Date().toISOString(),
       dataDir: store.dir,
@@ -511,14 +475,18 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
       mcpAdvice,
       // The alert line the board draws on the latency chart must be the same
       // threshold the advice uses, otherwise the chart celebrates a server the
-      // advice calls slow (or the reverse).
+      // advice calls slow (or the reverse). The per-tool thresholds ship too so
+      // the markdown report cannot disagree with mcpAdvice.
       mcp: {
         p95Ms: typeof config.mcpP95Ms === 'number' ? config.mcpP95Ms : null,
         errorRatePercent: typeof config.mcpErrorRatePercent === 'number' ? config.mcpErrorRatePercent : null,
+        toolP95Ms: typeof config.mcpToolP95Ms === 'number' ? config.mcpToolP95Ms : null,
+        toolErrorRatePercent:
+          typeof config.mcpToolErrorRatePercent === 'number' ? config.mcpToolErrorRatePercent : null,
       },
       runs: runsOf(records, skillScores, thresholds, minSamples, config.ciResamples ?? 200),
       turnLoads: turnLoads(records),
-      steps: stepLog.slice(-400),
+      steps: visibleSteps,
       stepTurns: stepView.turns,
       stepOverall: stepView.overall,
       edits,
@@ -549,274 +517,11 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
       },
       skills: entries,
     }
-    return report
-  }
-
-  /** One row per MCP server, merged across every skill window. */
-  function mcpServers(entries: ReadonlyArray<{ stats: { mcp?: Stats['mcp'] } }>) {
-    const merged = new Map<
-      string,
-      {
-        server: string
-        calls: number
-        errors: number
-        ms: number
-        samples: number[]
-        tools: Record<string, { calls: number; errors: number; ms: number; samples: number[] }>
-      }
-    >()
-    for (const entry of entries) {
-      for (const [server, bucket] of Object.entries(entry.stats.mcp ?? {})) {
-        const row = merged.get(server) ?? {
-          server,
-          calls: 0,
-          errors: 0,
-          ms: 0,
-          samples: [] as number[],
-          tools: Object.create(null),
-        }
-        row.calls += Number(bucket.calls) || 0
-        row.errors += Number(bucket.errors) || 0
-        row.ms += Number(bucket.ms) || 0
-        if (Array.isArray(bucket.samples)) {
-          for (const sample of bucket.samples) {
-            if (typeof sample === 'number' && row.samples.length < 400) row.samples.push(sample)
-          }
-        }
-        for (const [tool, stats] of Object.entries(bucket.tools ?? {})) {
-          if (!stats || typeof stats !== 'object' || Array.isArray(stats)) continue
-          const t = Object.hasOwn(row.tools, tool) ? row.tools[tool] : { calls: 0, errors: 0, ms: 0, samples: [] }
-          t.calls += Number(stats.calls) || 0
-          t.errors += Number(stats.errors) || 0
-          t.ms = (t.ms ?? 0) + (Number(stats.ms) || 0)
-          if (Array.isArray(stats.samples)) {
-            for (const sample of stats.samples) {
-              if (typeof sample === 'number' && t.samples.length < 60) t.samples.push(sample)
-            }
-          }
-          row.tools[tool] = t
-        }
-        merged.set(server, row)
-      }
-    }
-    const rows = [...merged.values()].map((row) => {
-      const errorRate = row.calls > 0 ? row.errors / row.calls : 0
-      const avgMs = row.calls > 0 ? row.ms / row.calls : null
-      const samples = Array.isArray(row.samples) ? [...row.samples].sort((a, b) => a - b) : []
-      const percentile = (p: number) => {
-        if (samples.length === 0) return null
-        const index = Math.min(samples.length - 1, Math.max(0, Math.round((p / 100) * (samples.length - 1))))
-        return samples[index]
-      }
-      let health = 100 - 70 * errorRate
-      if (avgMs !== null && avgMs > 1500) health -= Math.min(20, (avgMs - 1500) / 100)
-      health = Math.max(0, Math.min(100, health))
-      const toolPercentile = (samples: number[], p: number) => {
-        if (!Array.isArray(samples) || samples.length === 0) return null
-        const sorted = [...samples].sort((a, b) => a - b)
-        const index = Math.min(sorted.length - 1, Math.max(0, Math.round((p / 100) * (sorted.length - 1))))
-        return sorted[index]
-      }
-      const tools = Object.entries(row.tools)
-        .map(([tool, stats]) => ({
-          tool,
-          calls: stats.calls,
-          errors: stats.errors,
-          errorRate: stats.calls > 0 ? stats.errors / stats.calls : 0,
-          avgMs: stats.calls > 0 && stats.ms ? Math.round(stats.ms / stats.calls) : null,
-          p50Ms: toolPercentile(stats.samples, 50),
-          p95Ms: toolPercentile(stats.samples, 95),
-        }))
-        .sort((a, b) => b.calls - a.calls)
-      return {
-        server: row.server,
-        calls: row.calls,
-        errors: row.errors,
-        errorRate,
-        avgMs: avgMs === null ? null : Math.round(avgMs),
-        p50Ms: percentile(50),
-        p95Ms: percentile(95),
-        samples: samples.length,
-        health: Math.round(health * 10) / 10,
-        grade: gradeOf(health),
-        tools,
-      }
-    })
-    rows.sort((a, b) => a.health - b.health)
-    return rows
-  }
-
-  function clamp01(value: number): number {
-    return Math.max(0, Math.min(100, value))
-  }
-
-  /**
-   * Score one run (session) with its own dimensions: the quality of the skills
-   * it actually used, how stable the execution was, whether the user accepted
-   * the result, and what it cost. Weights differ from the skill score because a
-   * run is a sample of work, not an artifact.
-   */
-  function scoreRun(run: Run, skillScores: Map<string, number | null>, thresholds: Thresholds, minSamples: number) {
-    const skillValues = run.skills.map((name) => skillScores.get(name)).filter((value) => typeof value === 'number')
-    const quality = skillValues.length > 0 ? skillValues.reduce((a, b) => a + b, 0) / skillValues.length : null
-    const windows = run.closed
-    const correctionRate = windows > 0 ? run.corrections / windows : null
-    const errRate = run.toolCalls > 0 ? run.errors / run.toolCalls : null
-    const loopRate = windows > 0 ? Math.min(1, run.loopErrors / windows) : null
-    const outcome = correctionRate === null ? null : clamp01(100 - 45 * correctionRate)
-    const stability =
-      errRate === null && loopRate === null ? null : clamp01(100 - 60 * (errRate ?? 0) - 40 * (loopRate ?? 0))
-    const callsPerLoad = run.loads > 0 ? run.toolCalls / run.loads : null
-    // A load with no execution behind it is cheap but empty: judge it down
-    // instead of rewarding "nothing happened" with full efficiency.
-    let efficiency = callsPerLoad === null ? null : clamp01(100 - Math.max(0, callsPerLoad - 8) * 6)
-    if (efficiency !== null && callsPerLoad !== null && callsPerLoad < 1) efficiency = Math.min(efficiency, 45)
-    const dims = { quality, stability, outcome, efficiency }
-    const weights = { quality: 0.4, stability: 0.3, outcome: 0.2, efficiency: 0.1 }
-    let weighted = 0
-    let weightSum = 0
-    for (const [key, value] of Object.entries(dims) as Array<[keyof typeof weights, number | null]>) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) continue
-      weighted += value * weights[key]
-      weightSum += weights[key]
-    }
-    const total = weightSum > 0 ? Math.round((weighted / weightSum) * 10) / 10 : null
-    return {
-      total,
-      grade: gradeOf(total, thresholds),
-      confidence:
-        run.loads === 0 ? 'none' : run.loads < minSamples ? 'low' : run.loads < minSamples * 3 ? 'medium' : 'high',
-      provisional: run.loads < minSamples,
-      dimensions: dims,
-    }
-  }
-
-  /**
-   * Skill loads grouped by the loop turn that produced them, so a client surface
-   * can render the result under the exact completed turn instead of guessing.
-   */
-  function turnLoads(records: readonly StoredRecord[]) {
-    const byTurn = new Map<
-      string,
-      { sessionId: string; turn: number; skills: string[]; firstAt: number; lastAt: number }
-    >()
-    for (const record of records) {
-      if (!record || record.t !== 'skill' || typeof record.sessionId !== 'string') continue
-      if (typeof record.turn !== 'number' || typeof record.skill !== 'string') continue
-      const key = `${record.sessionId}#${record.turn}`
-      const entry = byTurn.get(key) ?? {
-        sessionId: record.sessionId,
-        turn: record.turn,
-        skills: [],
-        firstAt: record.at,
-        lastAt: record.at,
-      }
-      if (!entry.skills.includes(record.skill)) entry.skills.push(record.skill)
-      entry.lastAt = Math.max(entry.lastAt ?? record.at, record.at)
-      byTurn.set(key, entry)
-    }
-    return [...byTurn.values()].sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0)).slice(0, 100)
-  }
-
-  /** One row per session: what that run actually did, and how it went. */
-  function runsOf(
-    records: readonly StoredRecord[],
-    skillScores: Map<string, number | null>,
-    thresholds: Thresholds,
-    minSamples: number,
-    ciResamples: number,
-  ) {
-    const bySession = new Map<string, Run>()
-    const windowsBySession = new Map<string, Map<string, StoredRecord>>()
-    const touch = (sessionId: unknown) => {
-      if (typeof sessionId !== 'string' || sessionId.length === 0) return null
-      let run = bySession.get(sessionId)
-      if (!run) {
-        run = {
-          sessionId,
-          firstAt: null,
-          lastAt: null,
-          loads: 0,
-          closed: 0,
-          toolCalls: 0,
-          errors: 0,
-          corrections: 0,
-          mcpCalls: 0,
-          mcpErrors: 0,
-          tokens: 0,
-          loopErrors: 0,
-          skills: [],
-          score: null,
-        }
-        bySession.set(sessionId, run)
-      }
-      return run
-    }
-    for (const record of records) {
-      if (!record || typeof record !== 'object') continue
-      if (typeof record.sessionId !== 'string' || record.sessionId.length === 0) continue
-      if (record.t === 'skill') {
-        const run = touch(record.sessionId)
-        if (!run) continue
-        run.loads += 1
-        if (record.skill && !run.skills.includes(record.skill)) run.skills.push(record.skill)
-        run.firstAt = run.firstAt === null ? record.at : Math.min(run.firstAt, record.at)
-        run.lastAt = run.lastAt === null ? record.at : Math.max(run.lastAt, record.at)
-      } else if (record.t === 'window') {
-        touch(record.sessionId)
-        const bucket = windowsBySession.get(record.sessionId) ?? new Map<string, StoredRecord>()
-        // One window is persisted at turn end and again when it closes: keep the
-        // latest record per windowId so run counters and a bootstrap draw count
-        // it once.
-        bucket.set(record.windowId ?? `${record.at}:${bucket.size}`, record)
-        windowsBySession.set(record.sessionId, bucket)
-      }
-    }
-    // Sum the deduplicated, latest-per-window records, not every cumulative
-    // snapshot the recorder wrote.
-    for (const [sessionId, run] of bySession) {
-      const windows = [...(windowsBySession.get(sessionId) ?? new Map<string, StoredRecord>()).values()]
-      run.closed = windows.length
-      for (const window of windows) {
-        run.toolCalls += Number(window.toolCalls) || 0
-        run.errors += Number(window.errors) || 0
-        run.loopErrors += Number(window.loopErrors) || 0
-        run.corrections += Array.isArray(window.corrections) ? window.corrections.length : 0
-        const windowTokens = window.tokens
-        if (windowTokens && typeof windowTokens === 'object') {
-          run.tokens += (Number(windowTokens.input) || 0) + (Number(windowTokens.output) || 0)
-        }
-        for (const bucket of Object.values(window.mcp ?? {})) {
-          run.mcpCalls += Number(bucket?.calls) || 0
-          run.mcpErrors += Number(bucket?.errors) || 0
-        }
-        if (typeof window.at === 'number') {
-          run.lastAt = run.lastAt === null ? window.at : Math.max(run.lastAt, window.at)
-        }
-      }
-    }
-    const runs = [...bySession.values()].sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0)).slice(0, 20)
-    for (const run of runs) {
-      const score: RunScore = { ...scoreRun(run, skillScores, thresholds, minSamples), ci: null }
-      run.score = score
-      const windows = [...(windowsBySession.get(run.sessionId) ?? new Map<string, StoredRecord>()).values()]
-      score.ci = bootstrapCI(
-        windows,
-        (draw) => {
-          const summed = {
-            ...run,
-            closed: draw.length,
-            toolCalls: draw.reduce((a, w) => a + (w.toolCalls ?? 0), 0),
-            errors: draw.reduce((a, w) => a + (w.errors ?? 0), 0),
-            loopErrors: draw.reduce((a, w) => a + (w.loopErrors ?? 0), 0),
-            corrections: draw.reduce((a, w) => a + (Array.isArray(w.corrections) ? w.corrections.length : 0), 0),
-          }
-          return scoreRun(summed, skillScores, thresholds, minSamples).total
-        },
-        { resamples: ciResamples ?? 0, seed: hashSeed(run.sessionId) },
-      )
-    }
-    return runs
+    // Guided-optimization plans are computed once here (top 3 by expected
+    // gain/cost) so the HTML board consumes data instead of invoking the
+    // planner itself. The `loop` tool view still builds full plans on demand.
+    const loopPlans: LoopPlans = buildLoopPlans(report, { editBudgetMax: config.editBudgetMax ?? 4 }).slice(0, 3)
+    return { ...report, loopPlans }
   }
 
   async function buildOne(name: string): Promise<Report['skills'][number] | null> {

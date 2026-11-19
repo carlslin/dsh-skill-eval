@@ -1,8 +1,7 @@
 /** Rendering helpers: markdown for the agent-facing tool, HTML for the web dashboard. */
 
 import { localizeReport } from './advice.ts'
-import { buildLoopPlans } from './loop.ts'
-import { escapeHtml as esc, formatTimestamp } from './html.ts'
+import { escapeHtml as esc, escapeMdCell, formatTimestamp } from './html.ts'
 import type { Report, SkillEntry } from './report.ts'
 import type { buildValidity } from './validity.ts'
 import type { Advice } from './types.ts'
@@ -23,7 +22,9 @@ function pct(x: number | null | undefined): string {
 
 const SEV_ICON: Record<string, string> = { critical: '🛑', warning: '⚠️', info: 'ℹ️' }
 
-export function renderMcpMarkdown(report: Pick<Report, 'mcpServers' | 'mcpAdvice'>): string {
+export function renderMcpMarkdown(
+  report: Pick<Report, 'mcpServers' | 'mcpAdvice'> & { mcp?: Report['mcp'] | null },
+): string {
   const rows = report.mcpServers ?? []
   const lines = ['## MCP servers', '']
   if (rows.length === 0) {
@@ -34,7 +35,7 @@ export function renderMcpMarkdown(report: Pick<Report, 'mcpServers' | 'mcpAdvice
   lines.push('|---|---|---|---|---|---|---|---|')
   for (const row of rows) {
     lines.push(
-      `| \`${row.server}\` | ${fmt(row.health)} | **${row.grade}** | ${row.calls} | ${row.errors} | ${pct(row.errorRate)} | ${
+      `| \`${escapeMdCell(row.server)}\` | ${fmt(row.health)} | **${row.grade}** | ${row.calls} | ${row.errors} | ${pct(row.errorRate)} | ${
         row.p50Ms === null ? '—' : `${row.p50Ms}ms`
       } | ${row.p95Ms === null ? '—' : `${row.p95Ms}ms`} |`,
     )
@@ -59,16 +60,20 @@ export function renderMcpMarkdown(report: Pick<Report, 'mcpServers' | 'mcpAdvice
     lines.push('')
     for (const tool of failing.slice(0, 8)) {
       lines.push(
-        `- \`${tool.server}/${tool.tool}\` — ${tool.errors}/${tool.calls} failed (${pct(tool.errorRate)}) · p95 ${
+        `- \`${escapeMdCell(tool.server)}/${escapeMdCell(tool.tool)}\` — ${tool.errors}/${tool.calls} failed (${pct(tool.errorRate)}) · p95 ${
           tool.p95Ms === null || tool.p95Ms === undefined ? '—' : `${tool.p95Ms}ms`
         }`,
       )
     }
   }
+  // Use the same configured threshold advice.buildMcpAdvice uses; fall back to
+  // its default only when an older payload does not carry mcp.toolP95Ms.
+  const configuredToolP95 = Number(report.mcp?.toolP95Ms)
+  const slowToolP95Ms = Number.isFinite(configuredToolP95) && configuredToolP95 > 0 ? configuredToolP95 : 5000
   const slow = rows
     .flatMap((row) =>
       row.tools
-        .filter((tool) => typeof tool.p95Ms === 'number' && tool.p95Ms > 3000)
+        .filter((tool) => typeof tool.p95Ms === 'number' && tool.p95Ms > slowToolP95Ms)
         .map((tool) => ({ server: row.server, ...tool })),
     )
     .sort((a, b) => (b.p95Ms ?? 0) - (a.p95Ms ?? 0))
@@ -78,7 +83,7 @@ export function renderMcpMarkdown(report: Pick<Report, 'mcpServers' | 'mcpAdvice
     lines.push('')
     for (const tool of slow.slice(0, 8)) {
       lines.push(
-        `- \`${tool.server}/${tool.tool}\` — p50 ${tool.p50Ms ?? '—'}ms · p95 ${tool.p95Ms}ms · ${tool.calls} call(s)`,
+        `- \`${escapeMdCell(tool.server)}/${escapeMdCell(tool.tool)}\` — p50 ${tool.p50Ms ?? '—'}ms · p95 ${tool.p95Ms}ms · ${tool.calls} call(s)`,
       )
     }
   }
@@ -154,7 +159,7 @@ export function renderSummaryMarkdown(report: Report): string {
   lines.push('|---|---|---|---|---|---|---|---|---|---|')
   for (const s of report.skills) {
     lines.push(
-      `| \`${s.skill}\` | ${fmt(s.score.total)}${s.score.provisional ? '*' : ''}${
+      `| \`${escapeMdCell(s.skill)}\` | ${fmt(s.score.total)}${s.score.provisional ? '*' : ''}${
         s.score.ci ? ` (${fmt(s.score.ci.low, 0)}–${fmt(s.score.ci.high, 0)})` : ''
       } | **${s.score.grade}** | ${fmt(
         s.score.dimensions.static,
@@ -205,11 +210,11 @@ export function renderSummaryMarkdown(report: Report): string {
     lines.push('|---|---|---|---|---|---|---|---|')
     for (const run of report.runs.slice(0, 8)) {
       lines.push(
-        `| \`${run.sessionId.slice(-8)}\` | ${fmt(run.score?.total)} | **${run.score?.grade ?? '—'}** | ${run.loads} | ${
+        `| \`${escapeMdCell(String(run.sessionId).slice(-8))}\` | ${fmt(run.score?.total)} | **${run.score?.grade ?? '—'}** | ${run.loads} | ${
           run.toolCalls
         } | ${run.errors} | ${run.corrections} | ${run.skills
           .slice(0, 3)
-          .map((s) => `\`${s}\``)
+          .map((s) => `\`${escapeMdCell(s)}\``)
           .join(', ')} |`,
       )
     }
@@ -221,7 +226,7 @@ export function renderSummaryMarkdown(report: Report): string {
     lines.push('### Highest-value fixes')
     lines.push('')
     for (const s of flagged) {
-      lines.push(`**\`${s.skill}\`** — ${fmt(s.score.total)}/100 (${s.score.grade})`)
+      lines.push(`**\`${escapeMdCell(s.skill)}\`** — ${fmt(s.score.total)}/100 (${s.score.grade})`)
       if (typeof s.adviceBudget === 'number') {
         lines.push(`_edit budget: ${s.adviceBudget} concurrent change(s) this round_`)
       }
@@ -240,7 +245,7 @@ export function renderSummaryMarkdown(report: Report): string {
 
 export function renderSkillMarkdown(entry: SkillEntry): string {
   const lines: string[] = []
-  lines.push(`## \`${entry.skill}\` — ${fmt(entry.score.total)}/100 (${entry.score.grade})`)
+  lines.push(`## \`${escapeMdCell(entry.skill)}\` — ${fmt(entry.score.total)}/100 (${entry.score.grade})`)
   lines.push('')
   if (entry.score.ci) {
     lines.push(
@@ -412,7 +417,14 @@ const BOARD: Record<'en' | 'zh', BoardText> = {
     loadsLine: (r) =>
       `${r.totals.invocations} 次加载 · ${r.totals.skills} 个技能 · ${r.totals.closed} 个已结算窗口 · 生成于 ${r.generatedAt}`,
     noSkills: '还没有记录到技能加载。',
-    dims: { static: '静态质量', reliability: '可靠性', effectiveness: '有效性', efficiency: '效率' },
+    dims: {
+      static: '静态质量',
+      reliability: '可靠性',
+      effectiveness: '有效性',
+      efficiency: '效率',
+      lifecycle: '生命周期',
+      mcp: 'MCP',
+    },
     meta: (s) =>
       `${s.stats.loads} 次加载 · 纠正 ${pct(s.stats.correctionRate)} · 忽略 ${pct(s.stats.abandonRate)} · 报错 ${pct(
         s.stats.errRate,
@@ -481,7 +493,10 @@ export function renderHtml(input: Report, options: { lang?: string; base?: strin
     .join('\n')
 
   const validity = report.validity ?? null
-  const plans = buildLoopPlans(report, { editBudgetMax: report.scoring?.editBudgetMax ?? 4 }).slice(0, 3)
+  // Plans are computed once in the analyzer and shipped with the report, so
+  // this pure renderer never invokes the planner. Older payloads without the
+  // field fall back to the empty state.
+  const plans = (report.loopPlans ?? []).slice(0, 3)
   const nextSteps = plans.length
     ? `<div class="block"><h2>${esc(t.nextTitle)}</h2><ol class="steps">${plans
         .map(

@@ -1,8 +1,8 @@
 # dsh-skill-eval
 
-[![npm](https://img.shields.io/npm/v/dsh-skill-eval)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.22.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![latest release](https://img.shields.io/github/v/release/carlslin/dsh-skill-eval?display_name=tag)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.22.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 Records what happens **after** a skill is loaded, scores every skill 0–100, and
 turns the evidence into fixes the agent can act on. It is a DeepSeek Harness
@@ -145,21 +145,29 @@ The form lives in the bundle page; the same values can be seeded in config or
 
 ```yaml
 enabled: true
-windowToolCalls: 12 # tool calls that count as evidence for one load
+windowToolCalls: 12 # tool calls that count as evidence for one load (live)
+windowTtlMs: 1800000 # how long an open window waits for follow-up work
 minSamples: 3 # loads before a score stops being provisional
 weights: { static: 30, reliability: 25, effectiveness: 30, efficiency: 15 }
 thresholds: { excellent: 90, good: 80, pass: 70 }
 tokenBudgetPerLoad: 20000 # billable tokens per load before efficiency/advice react
 adviceNoiseFloor: true # advice must clear its 95% interval to stay critical
+redactCorrections: false # true = store "[redacted N chars]" instead of user text
 turnReports: true # one board per settled turn under reports/turns/
+turnReportsKeep: 50 # per-turn boards to keep
+reportOnTurnEnd: true # write reports/latest.md + latest.json after each turn
+# snapshots: { latest: true, turns: true, keep: 50 } # same trio as one object
 promptHint: true # the one-line system-prompt hint; false = zero fixed cost
 registerReviewTool: true # skill_eval_review: leakage critic + audit ledger
 ```
 
-Full key list (25 settings incl. pruning, edit budget, cache weight, dashboard
-path, inspect provider and MCP thresholds): [docs/DETAIL.md](docs/DETAIL.md#configuration-keys).
+Full key list (31 settings incl. pruning, edit budget, cache weight, MCP tool
+thresholds, dashboard path and the snapshots trio):
+[docs/DETAIL.md](docs/DETAIL.md#configuration-keys).
 `DSH_SKILL_EVAL_DIR` overrides the data directory; `$DSH_HOME/skill-eval/$DSH_PROFILE`
-is the default.
+is the default. Data/settings JSON stays under the canonical `/skill-eval`
+base and is mirrored under a custom `dashboardPath`, so a moved board keeps
+working after a hot reload.
 
 ## Release
 
@@ -218,5 +226,7 @@ client surfaces mounted in jsdom.
 
 - Loads are recorded from `skill` tool calls and user-typed `/skill-name` invocations; a skill the harness activates without either is invisible.
 - Effectiveness is inferred from the next user message, not from a task verdict.
-- Advice evidence keeps measured ids/numbers in English even in the Chinese UI.
-- Telemetry grows without pruning: each load writes a skill/window pair, each resolved skill also a `static` profile, and every agent step one `step` row (the dominant growth in long sessions).
+- Advice evidence keeps measured ids/numbers in English even in the Chinese UI; evidence tables escape Markdown so skill names and user text cannot break the report layout.
+- Telemetry is bounded to 8 MB (`events.jsonl` rotates to its newest half, keeping the `edit` audit ledger first). Step rows are the dominant growth in long sessions; per-skill trends keep the last 12 loads and runs keep the last 20 sessions.
+- Small samples never report strong significance: rate gates with fewer than 8 windows cap at `info`, and prune advice requires at least 6 loads (the configured `pruneMinLoads`, default 12) plus a bootstrap interval below the bar.
+- Privacy: user correction text is stored by default; set `redactCorrections: true` to keep only `[redacted N chars]`. Report/board reads reject cross-site fetch metadata.

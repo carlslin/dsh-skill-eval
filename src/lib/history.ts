@@ -6,7 +6,7 @@
  * reported as inconclusive rather than as an improvement.
  */
 
-import { formatTimestamp } from './html.ts'
+import { escapeMdCell, formatTimestamp } from './html.ts'
 import { foldSamples } from './store.ts'
 import type { FoldedSample } from './store.ts'
 import type { StoredRecord } from './types.ts'
@@ -104,9 +104,10 @@ export function buildImpact(records: readonly StoredRecord[], skill: string) {
 }
 
 export function renderHistoryMarkdown(history: ReturnType<typeof buildHistory> | null | undefined): string {
-  if (!history || history.loads.length === 0) return `No closed window recorded for \`${history?.skill ?? '?'}\` yet.`
+  if (!history || history.loads.length === 0)
+    return `No closed window recorded for \`${escapeMdCell(history?.skill ?? '?')}\` yet.`
   const lines = [
-    `## History — \`${history.skill}\``,
+    `## History — \`${escapeMdCell(history.skill)}\``,
     '',
     `loads: **${history.loads.length}** (${history.closed} closed) · trend: **${history.trend}**`,
     history.note,
@@ -127,8 +128,8 @@ export function renderHistoryMarkdown(history: ReturnType<typeof buildHistory> |
 
 export function renderImpactMarkdown(impact: ReturnType<typeof buildImpact> | null | undefined): string {
   if (!impact || impact.edits === 0)
-    return `No screened edit recorded for \`${impact?.skill ?? '?'}\` yet. Use skill_eval_review before changing it.`
-  const lines = [`## Edit impact — \`${impact.skill}\``, '', `${impact.edits} screened edit(s)`, '']
+    return `No screened edit recorded for \`${escapeMdCell(impact?.skill ?? '?')}\` yet. Use skill_eval_review before changing it.`
+  const lines = [`## Edit impact — \`${escapeMdCell(impact.skill)}\``, '', `${impact.edits} screened edit(s)`, '']
   for (const comparison of impact.comparisons) {
     const when = formatTimestamp(comparison.at)
     lines.push(`### ${when} · ${comparison.dimension ?? 'unspecified'} · ${comparison.verdict}`)

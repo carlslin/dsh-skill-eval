@@ -23,9 +23,9 @@ return {
       ctx.slots.register({ name: 'sidebar.panellist', id: 'skill-eval', order: 40, label: panelLabel }, PanelIcon),
     )
     ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'skill-eval' }, BoardPanel))
-    // Two human entry points by design: the in-conversation strip (below)
-    // and one board row in the session header's More menu. Settings live in
-    // the plugin's own row config page, not a separate section.
+    // Two human entry points by design: the in-conversation strip (below) and
+    // the sidebar panel + main board. Settings live in the plugin's own row
+    // config page, not a separate section.
     if (ENABLE_POPUP) {
       ctx.slots.inject('sidebar.footer.action', () =>
         ctx.slots.register(

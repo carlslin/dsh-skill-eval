@@ -1,8 +1,8 @@
 # dsh-skill-eval（技能评测）
 
-[![npm](https://img.shields.io/npm/v/dsh-skill-eval)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.22.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![latest release](https://img.shields.io/github/v/release/carlslin/dsh-skill-eval?display_name=tag)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.22.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 记录 **skill 加载之后**真实发生了什么：加载成败、后续工具报错、用户有没有推翻、
 技能是否被忽略、是否与兄弟技能碰撞、花了多少 token。每个技能打 0–100 分，并把
@@ -124,20 +124,25 @@ npm 包和发布 tarball 是预构建的。git 检出目录不是。修改 `src/
 
 ```yaml
 enabled: true
-windowToolCalls: 12 # 一次加载的证据窗口内工具调用数
+windowToolCalls: 12 # 一次加载的证据窗口内工具调用数（立即生效）
 minSamples: 3 # 样本达到多少后分数不再算临时值
 weights: { static: 30, reliability: 25, effectiveness: 30, efficiency: 15 }
 thresholds: { excellent: 90, good: 80, pass: 70 }
-tokenBudgetPerLoad: 20000 # 单次加载可计费 token 预算
+tokenBudgetPerLoad: 20000 # 单次加载可计费 token 预算（并行窗口按 1/N 分摊）
 adviceNoiseFloor: true # 建议必须越过 95% 区间才保持 critical
+redactCorrections: false # true = 用户纠正只存脱敏占位符
 turnReports: true # 每个结算回合写一份看板到 reports/turns/
+turnReportsKeep: 50 # 保留多少块按回合看板
+reportOnTurnEnd: true # 每回合写 latest.md + latest.json
+# snapshots: { latest: true, turns: true, keep: 50 } # 三件套可写成一个对象
 promptHint: true # 系统提示里一行提示；false = 零固定成本
 registerReviewTool: true # skill_eval_review：泄漏审查 + 审计账本
 ```
 
-全部 25 项（含剪枝、编辑预算、缓存权重、面板路径、Inspect provider、MCP 阈值）：
+全部 31 项（含剪枝、编辑预算、缓存权重、MCP 工具阈值、面板路径、快照三件套）：
 [docs/DETAIL.md](docs/DETAIL.md#configuration-keys)。`DSH_SKILL_EVAL_DIR` 可覆盖数据目录，
-默认 `$DSH_HOME/skill-eval/$DSH_PROFILE`。
+默认 `$DSH_HOME/skill-eval/$DSH_PROFILE`。数据/设置 JSON 常驻标准 `/skill-eval` 基址，
+自定义 `dashboardPath` 下也会镜像一份，热重载后看板不断连。
 
 ## 测试
 

@@ -68,7 +68,7 @@ test('every advice rule carries Chinese copy, and localizeAdvice picks it', () =
   assert.equal(zh.title, rule.titleZh)
   assert.match(zh.title, /加载失败/)
   assert.equal(localizeAdvice(rule, 'en').title, rule.title)
-  const mcp = buildMcpAdvice([{ server: 'bad-server', calls: 4, errors: 2, errorRate: 0.5 }])
+  const mcp = buildMcpAdvice([{ server: 'bad-server', calls: 6, errors: 3, errorRate: 0.5 }])
   const mcpRule = byId(mcp, 'mcp-server-errors')
   assert.match(localizeAdvice(mcpRule, 'zh').title, /bad-server/)
   assert.match(localizeAdvice(mcpRule, 'zh').fix, /服务器进程/)
@@ -224,7 +224,11 @@ test('a loop that breaks after the load yields a critical rule naming the error'
 })
 
 test('heavy model-request retries yield a warning rule', () => {
-  const { advice } = analyze([sample({ window: { llmRetries: 3 } }), sample({ window: { llmRetries: 3 } })])
+  const { advice } = analyze([
+    sample({ window: { llmRetries: 3 } }),
+    sample({ window: { llmRetries: 3 } }),
+    sample({ window: { llmRetries: 3 } }),
+  ])
   assert.ok(advice.some((a) => a.id === 'llm-retries'))
 })
 
@@ -306,11 +310,19 @@ test('the noise floor downgrades a rate that is not outside its interval yet', (
 })
 
 test('the noise floor keeps critical when the interval clears the threshold', () => {
+  // 9 of 10 windows corrected with n>=8: the capped gate can still report
+  // strong, so the rule keeps its critical severity with no noise caveat.
   const windows = [
     { corrections: ['不对'] },
     { corrections: ['错了'] },
     { corrections: ['还是不行'] },
     { corrections: ['不对'] },
+    { corrections: ['错了'] },
+    { corrections: ['不行'] },
+    { corrections: ['不对'] },
+    { corrections: ['错了'] },
+    { corrections: ['还是不对'] },
+    { corrections: [] },
   ]
   const samples = windows.map((w) =>
     sample({ window: { ...w, toolCalls: 3, errors: 0, errorNames: [], otherSkills: [], turnEnded: true } }),
