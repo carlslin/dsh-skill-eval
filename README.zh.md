@@ -29,6 +29,8 @@
 - `/skill-eval/board/<版本>` —— HTML 看板：等级、维度条、优先修复
 - 追加式 JSONL 遥测：`$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
   （上限 8 MB，写满后丢弃最旧的一半，长期运行也不会无限增长）
+- **技能卡「复制问题」**：把该卡当前的评分、维度、证据和全部问题复制成可直接粘贴的
+  Markdown 修复任务；单条建议仍保留「复制此问题」。
 
 ## 截图
 
@@ -156,6 +158,16 @@ npm test
 纠正 → 关闭）、带残缺行的存储往返、分析器 join、Markdown/HTML 渲染（含转义与中文
 建议文案）、重复路由压力下的宿主路由注册，以及客户端的 jsdom 挂载测试。
 
+## 反馈
+
+问题和建议走 GitHub Issues：<https://github.com/carlslin/dsh-skill-eval/issues>。
+请附插件版本（`dsh plugin list`）、DSH 版本与 profile、看板前后对比和复现步骤；
+看板技能卡上的「复制问题」能生成可直接粘贴的 Markdown 报告。
+
+遥测不出本机：记录在 `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`；
+`redactCorrections: true` 时用户纠正文本只存 `[redacted N chars]`。
+贴片段前先看 [docs/DETAIL.md](docs/DETAIL.md) 的记录 schema。
+
 ## 更多文档
 
 - [docs/AUDIT.md](docs/AUDIT.md) —— 多层审计：问题、修复与遗留
@@ -174,4 +186,4 @@ npm test
 - 记录 `skill` 工具调用与用户输入的 `/skill-name`；harness 自动激活、既不调工具也不输命令的技能看不到。
 - 有效性推断自下一条用户消息，不是任务结论。
 - 中文界面下建议的 evidence 仍保留测量用的英文 id/数字。
-- 遥测只追加、不自动清理（每次加载一对小记录）。
+- 遥测只追加；上限 8 MB，写满后保留最新一半（`edit` 审计账本优先保留）。

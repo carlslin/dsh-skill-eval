@@ -43,7 +43,26 @@ dsh plugin --profile sevsmoke remove dsh-skill-eval
       `latest-snapshot` 显示 **SKIP**（还没加载过技能），不算失败；加载一次技能后重跑，
       这些项应变为 PASS。
 
-## 5. 已知遗留（不阻塞发布）
+## 5. GitHub Release
+
+tag 推上去了不等于发布了：`gh release list` 仍会显示上一个版本，`/releases/latest`
+也还指旧版本。1.22.0 和 1.23.0 就是这样漏掉的，发布页要单独建：
+
+```bash
+VERSION=<version>
+TITLE="v$VERSION — <一句话亮点>"
+# 取 CHANGELOG 中本版本的条目当正文
+awk -v v="$VERSION" 'BEGIN{p=0} $0 ~ "^## " v " " {p=1; next} p && /^## / {exit} p' \
+  CHANGELOG.md > /tmp/release-$VERSION.md
+gh release create "v$VERSION" --title "$TITLE" \
+  --notes-file /tmp/release-$VERSION.md --verify-tag --latest
+```
+
+- [ ] `gh release list --limit 3` 中本版本标记 **Latest**
+- [ ] <https://github.com/carlslin/dsh-skill-eval/releases/latest> 打开就是本版本
+- [ ] README 的两个徽章版本号与 tag 一致
+
+## 6. 已知遗留（不阻塞发布）
 
 - 插件详情页展示英文 `README.md`；看板里的建议正文为英文（规则输出），中文界面下中英混排。
 - 原生配置页在 README 之后，需向下滚动。

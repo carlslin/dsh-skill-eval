@@ -209,6 +209,19 @@ a torn line, analyzer join, markdown/HTML rendering incl. escaping and bilingual
 advice copy, host route registration under duplicate-route pressure, and the
 client surfaces mounted in jsdom.
 
+## Feedback
+
+Issues are the intake: <https://github.com/carlslin/dsh-skill-eval/issues>.
+Include the plugin version (`dsh plugin list`), the DSH version and profile, what
+the board showed before/after, and the steps to reproduce. On the skills board,
+**Copy issues** on a skill card produces a self-contained Markdown block you can
+paste into the report.
+
+Telemetry never leaves the machine: events live in
+`$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`, and `redactCorrections: true`
+stores `[redacted N chars]` instead of the user's text. See
+[docs/DETAIL.md](docs/DETAIL.md) for the record schema before attaching excerpts.
+
 ## More docs
 
 - [docs/AUDIT.md](docs/AUDIT.md) — multi-layer audit: findings, fixes, residuals
@@ -219,6 +232,7 @@ client surfaces mounted in jsdom.
 - [docs/DETAIL.md](docs/DETAIL.md) — rubric, record schema, full configuration keys, why this exists
 - [docs/RRSI-NOTES.md](docs/RRSI-NOTES.md) — research notes and what we borrowed
 - [docs/COMPARISON.md](docs/COMPARISON.md) — prior art and what each misses
+- [docs/RELEASE.md](docs/RELEASE.md) — release checklist, tag/release sync and clean-profile smoke test
 - [docs/DEV-RELOAD.md](docs/DEV-RELOAD.md) — hot-reload recipe and disposable-profile verification
 - [CHANGELOG.md](CHANGELOG.md) — release history
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: npm package
+    url: https://www.npmjs.com/package/dsh-skill-eval
+    about: Install command, published versions and tarball contents
+  - name: Docs
+    url: https://github.com/carlslin/dsh-skill-eval/tree/main/docs
+    about: Rubric, record schema, entry points and release checklist

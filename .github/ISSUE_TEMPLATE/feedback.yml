@@ -1,0 +1,41 @@
+name: Feedback or feature request
+description: How the scores and advice landed, or what the plugin should do next.
+title: '[feedback] '
+labels:
+  - feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feedback shapes the rubric. Concrete examples (skill name, score, what the advice said, what you changed) are more useful than votes.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of feedback
+      options:
+        - A score or grade does not match my experience
+        - The advice was wrong or not actionable
+        - A missing signal or scenario
+        - Install, packaging or docs problem
+        - Feature request
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Plugin version, DSH version, which skill(s), and what the board showed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen instead
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed private text and skill names I do not want public.
+          required: true

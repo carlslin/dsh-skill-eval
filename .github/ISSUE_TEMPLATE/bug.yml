@@ -1,0 +1,52 @@
+name: Bug report
+description: The board, result strip, settings page or tool behaves differently than documented.
+title: '[bug] '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Telemetry stays on your machine — attach only excerpts you are comfortable sharing.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `dsh plugin list` or the npm/release badge.
+      placeholder: 1.23.0
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version and profile
+      placeholder: 'dsh 0.2.2-rc.1, profile web'
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened
+      description: What did you see, what did you expect, and on which screen (result strip, skills/steps/runs/MCP/dev tab, settings, slash command, tool)?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load skill ...
+        2. Open the board ...
+        3. Click ...
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: "Paste the board's Copy issues output, a relevant line from $DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl, or a screenshot. Redact private text first."
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed private text, skill names and screenshots I do not want public.
+          required: true
