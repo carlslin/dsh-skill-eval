@@ -4,34 +4,41 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![release](https://img.shields.io/badge/release-v1.23.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
-Records what happens **after** a skill is loaded, scores every skill 0–100, and
-turns the evidence into fixes the agent can act on. It is a DeepSeek Harness
-(DSH) plugin: telemetry, the scoring board and the agent-facing
-`skill_eval_report` tool ship together.
+A skill has no report card. This plugin keeps one.
 
-Most skill-quality tooling checks the skill _file_. This plugin checks the
-_execution_: did the load succeed, did the tools that followed fail, did the user
-push back, was the skill ignored, did it collide with a sibling skill, what did
-it cost. Those signals only exist inside a running harness — which is why this
-is a DSH plugin rather than a CLI.
+Every time a skill loads, it quietly writes down what happened next: did the load
+work, did the following tool calls fail, did you have to correct the answer, did
+the skill get ignored, did it collide with another skill, what did it cost. After
+a few runs each skill has a 0–100 score and a short list of concrete edits.
+
+It ships as a DeepSeek Harness (DSH) plugin, and that matters: most skill checkers
+review the skill _file_, while the signals above only exist while the harness is
+running.
+
+New here? Install it (`dsh plugin --profile desktop add dsh-skill-eval`), use a
+skill once, then read the strip under that turn.
 
 ## 中文速览 · TL;DR for Chinese readers
 
-- 在每次 `skill` 加载后收集执行遥测：加载成败、后续工具报错、用户是否推翻、是否被忽略、碰撞与成本。
-- 每个技能 0–100 分（A≥90 / B≥80 / C≥70 / D≥60 / F<60），带 95% bootstrap 区间；区间重叠时排名标为不显著。
+- 每次 `skill` 加载后记录执行情况：加载成败、后续工具报错、用户是否推翻、是否被忽略、是否撞车、花了多少。
+- 每个技能 0–100 分（A≥90 / B≥80 / C≥70 / D≥60 / F<60），带 95% 区间；区间重叠就标“排名不显著”，样本不够时不下结论。
 - 入口只有三个：回合下方结果条、侧边栏「技能评测」面板、设置 → 插件 → `dsh-skill-eval` 的配置页。
 - 建议靠规则生成，每条都带触发数字和可执行的修复；中文界面下标题与修复为中文。
 - 完整中文文档：[README.zh.md](README.zh.md)；入口清单：[docs/ENTRYPOINTS.md](docs/ENTRYPOINTS.md)。
 
 ## What you get
 
-- **a result strip in the conversation** — under every completed turn that loaded a skill, a one-line card shows the skill scores, this turn's call/error counts and an expandable list of fixes (zero tokens, no popup). The old popup is opt-in (`window.__SEV_ENABLE_POPUP__ = true`).
-- `skill_eval_report` tool — the agent reads its own telemetry instead of guessing
-- `/skill-eval [skill]` command — same report in the composer
-- `/skill-eval/board/<version>` — HTML board with grades, dimension bars and top fixes
-- append-only JSONL telemetry in `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
-  (bounded to 8 MB: the oldest records are trimmed once it fills, with the `edit`
-  audit ledger kept, so a long-lived profile cannot grow without limit)
+- **A result strip** under every finished turn that used a skill: the score, this
+  turn's calls and errors, and the fixes you can expand (no tokens, no popup).
+  The old popup is opt-in (`window.__SEV_ENABLE_POPUP__ = true`).
+- **A board** at `/skill-eval/board/<version>` with grades, dimension bars and the
+  next edits for every skill.
+- **An agent tool**, `skill_eval_report`, so the agent reads its own numbers
+  instead of guessing. `/skill-eval [skill]` gives you the same report in the
+  composer.
+- **A local record**: an append-only JSONL file at
+  `$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`, capped at 8 MB (the oldest
+  half is trimmed; the `edit` audit ledger stays). Nothing is uploaded.
 
 ## Screenshots
 
@@ -42,7 +49,7 @@ is a DSH plugin rather than a CLI.
 More real-window screenshots and the per-screen notes:
 [docs/UI-REVIEW.md](docs/UI-REVIEW.md).
 
-## Scoring in one look
+## What goes into a score
 
 | dimension     | weight | signal                                                            |
 | ------------- | ------ | ----------------------------------------------------------------- |
@@ -51,10 +58,16 @@ More real-window screenshots and the per-screen notes:
 | effectiveness | 0.30   | user corrections, ignored loads, sibling collisions               |
 | efficiency    | 0.15   | tool calls per run, load latency                                  |
 
-Grades: `A ≥ 90`, `B ≥ 80`, `C ≥ 70`, `D ≥ 60`, `F < 60`. Every score carries a
-95% bootstrap confidence interval; overlapping intervals are reported as a
-non-significant rank. Dimensions without evidence are dropped and their weight
-redistributed. Full rubric, record schema and formulas: [docs/DETAIL.md](docs/DETAIL.md).
+Grades: `A ≥ 90`, `B ≥ 80`, `C ≥ 70`, `D ≥ 60`, `F < 60`.
+
+### How to read a score
+
+A score is a summary, not a verdict. Every number carries a 95% interval; when
+two skills' intervals overlap, the board says the ranking is not significant.
+Fewer than `minSamples` loads (default 3) makes a score provisional. A dimension
+with no evidence is dropped and the remaining weights are rescaled instead of
+counting as zero. The full rubric and formulas live in
+[docs/DETAIL.md](docs/DETAIL.md).
 
 Advice is never generic. Each item carries the number that triggered it and a
 concrete edit:
@@ -126,7 +139,12 @@ settings live under **Settings → Plugins → `dsh-skill-eval`**.
 
 - **Result strip** under every completed turn: score chip, calls/errors, next
   fix and edit history (zero tokens).
-- **Board**: skills / steps / runs / MCP / dev tabs with next steps and evidence validity, plus SVG charts (score distribution, skill trend sparkline, evidence coverage, MCP p50/p95, session activity). The **steps** tab scores every loop step and compares recent turns. Each skill card has a **Copy issues** button next to 查看轨迹 that copies the card's current issues, score, dimensions and evidence as one self-contained Markdown repair task; each advice row keeps its own copy button.
+- **Board**: skills / steps / runs / MCP / dev tabs, with next steps and charts
+  (score spread, skill trend, evidence coverage, MCP latency, session activity).
+  The **steps** tab scores each loop step and compares recent turns.
+- **Copy issues**: on a skill card, one click copies that card's current issues,
+  score, dimensions and evidence as a self-contained Markdown repair task; every
+  advice row still copies on its own.
 - **Agent**: ask "how did `pdf-tools` perform?" — the agent calls
   `skill_eval_report`; before editing a skill it is told to call
   `skill_eval_review` first.
