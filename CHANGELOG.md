@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.23.1 — docs that speak plainly
+
+- **Both READMEs now lead with the story** instead of the rubric: what the plugin
+  records after a skill loads, why that needs a plugin rather than a CLI, and how
+  to read a score (overlapping intervals = no ranking claim, fewer than
+  `minSamples` loads = provisional, missing dimensions are rescaled rather than
+  scored zero). The bootstrap formulas stay in [docs/DETAIL.md](docs/DETAIL.md).
+- **Feedback intake exists.** Bug and feedback issue forms, a `feedback` label, a
+  Feedback section in both READMEs, and the npm page as the repository homepage.
+- **docs/RELEASE.md gained the GitHub Release step** whose absence left 1.22.0 and
+  1.23.0 tagged but unpublished; the checklist now ends by verifying
+  `/releases/latest`.
+- Fixed the Chinese README's stale "telemetry is never pruned" claim (it is capped
+  at 8 MB) and added the 1.23.0 **Copy issues** entry point.
+- No runtime change: the packaged code is identical to 1.23.0 apart from the docs.
+  Tests: **327 passing** (`npm test`).
+
 ## 1.23.0 — per-skill issue handoff
 
 - **Copy a whole skill's issues from its card.** Every skills-board card now

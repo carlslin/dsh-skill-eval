@@ -1,8 +1,8 @@
 # dsh-skill-eval（技能评测）
 
-[![npm](https://img.shields.io/badge/npm-v1.23.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.23.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.23.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.23.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 技能没有成绩单。这个插件替它记一份。
 
