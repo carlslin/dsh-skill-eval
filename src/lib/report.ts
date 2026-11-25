@@ -208,6 +208,10 @@ export function resolveThresholds(input: unknown): Thresholds {
 export interface StaticQuality {
   name?: string
   description?: string
+  catalogDescription?: string
+  catalogTruncated?: boolean
+  catalogComplete?: boolean
+  modelInvocable?: boolean
   whenToUse?: string
   bodyLines?: number
   sectionCount?: number
@@ -257,10 +261,14 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
     let profile: StaticQuality | null = null
     for (const options of [{}, { cwd: process.cwd() }]) {
       try {
-        const summary = (await ctx.skills.list(options)).find((s: Host) => s.name === name)
+        const snapshot =
+          typeof ctx.skills.snapshot === 'function'
+            ? await ctx.skills.snapshot(options)
+            : { skills: await ctx.skills.list(options), complete: true }
+        const summary = (snapshot?.skills ?? []).find((s: Host) => s.name === name)
         if (!summary) continue
         const definition = await ctx.skills.get(name, options)
-        profile = staticProfile(summary, definition)
+        profile = staticProfile(summary, definition, { catalogComplete: snapshot?.complete !== false })
         break
       } catch {
         profile = null
@@ -312,6 +320,10 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
     return {
       name: text(latest.static.name),
       description: text(latest.static.description),
+      catalogDescription: text(latest.static.catalogDescription),
+      catalogTruncated: latest.static.catalogTruncated === true,
+      catalogComplete: latest.static.catalogComplete !== false,
+      modelInvocable: latest.static.modelInvocable !== false,
       whenToUse: text(latest.static.whenToUse),
       bodyLines: num(latest.static.bodyLines),
       sectionCount: num(latest.static.sectionCount),

@@ -47,7 +47,14 @@ directory keeps whatever mode the user gave it.
 { "t": "window", "v": 1, "at": 1763, "windowId": "…", "sessionId": "…",
   "skill": "pdf-tools", "toolCalls": 4, "errors": 1, "errorNames": ["ToolError"],
   "corrections": ["不对，页眉没删掉"], "otherSkills": ["docx"], "turnEnded": true,
-  "truncated": false, "closeReason": "user-turn" }
+  "truncated": false, "closeReason": "user-turn",
+  "messageIds": ["msg…"], "feedback": { "positive": 1, "negative": 0, "categories": { "good": 1 }, "notes": [] },
+  "outcomes": { "deliverables": 1, "workspaceChanges": 1, "jobsSettled": 0, "jobsFailed": 0,
+                "tasksCompleted": 0, "tasksFailed": 0, "workflowRuns": 0 },
+  "approvals": { "asked": 1, "decided": 1, "rejected": 0 },
+  "context": { "compactions": 0, "permissionPreset": "workspace-write", "sandboxMode": "workspace-write" },
+  "model": { "provider": "deepseek", "model": "…", "effort": "high", "preset": "coding" },
+  "agentName": null, "agentKind": "root" }
 ```
 
 A **window** is the stretch of work that follows one skill load. It is the unit
@@ -72,28 +79,31 @@ Window lifetime, deliberately unusual:
 total = Σ(weightᵢ × dimensionᵢ) / Σ(weightᵢ over dimensions with evidence)
 ```
 
-| dimension     | weight | source                                                          |
-| ------------- | ------ | --------------------------------------------------------------- |
-| static        | 0.30   | the live skill catalog (`skills.list` + `skills.get`)           |
-| reliability   | 0.25   | load success × post-load tool error rate                        |
-| effectiveness | 0.30   | user corrections, ignored loads, sibling collisions, error rate |
-| efficiency    | 0.15   | average tool calls per run, median load latency                 |
+| dimension     | weight | source                                                                                                |
+| ------------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| static        | 0.30   | the live skill catalog (`skills.list` + `skills.get`)                                                 |
+| reliability   | 0.25   | load success × post-load tool error rate                                                              |
+| effectiveness | 0.30   | explicit feedback, text corrections, ignored loads, sibling collisions, error rate, produced outcomes |
+| efficiency    | 0.15   | average tool calls per run, median load latency, context compactions                                  |
 
 A dimension with no evidence is dropped and its weight redistributed, so a
 brand-new skill is not punished for having no history; `provisional` marks
 scores below `minSamples` loads.
 
-### static checks (117 points, normalised)
+### static checks (115 points, normalised)
 
 Twelve weighted checks; checks that cannot be evaluated (no filesystem view,
 unresolved references) are marked skipped and dropped from both earned and
 total weight, so the static score is always a percentage of what was checkable.
+Description checks use the **catalog-rendered** description (whitespace-normalized,
+capped at the catalog limit), not the raw frontmatter; `whenToUse` is not
+rendered in the DSH catalog and is therefore no longer scored.
 
 | check                  | weight | rule                                                    |
 | ---------------------- | ------ | ------------------------------------------------------- |
-| desc-length            | 12     | description length within the useful band               |
-| desc-trigger           | 12     | description says _when_ to use the skill                |
-| when-to-use            | 8      | `whenToUse` present                                     |
+| desc-length            | 12     | rendered description length within the useful band      |
+| desc-trigger           | 12     | rendered description says _when_ to use the skill       |
+| catalog-truncated      | 6      | description fits the model catalog cap                  |
 | body-present           | 10     | SKILL.md body resolves and is non-trivial               |
 | body-compact           | 18     | ≤ 500 body lines (`1 − (lines − 500)/1000` beyond that) |
 | sections               | 10     | ≥ 2 `##` headings                                       |
@@ -108,10 +118,12 @@ total weight, so the static score is always a percentage of what was checkable.
 
 ```
 reliability   = 100 · loadOkRate · (0.6 + 0.4 · (1 − min(1, 2·errRate)))
-effectiveness = 100 − 45·correctionRate − 25·abandonRate − 20·siblingRate − 10·errRate
+effectiveness = 100 − (feedbackTotal > 0 ? 50·negativeRate : 45·correctionRate)
+                  − 25·abandonRate − 20·siblingRate − 10·errRate + 8·outcomeRate
 efficiency    = 100 − (avgCalls > 8 ? min(40, (avgCalls−8)·6) : 0) − (avgCalls < 1 ? 15 : 0)
                      − (p50LoadMs > 2000 ? min(30, (p50LoadMs−2000)/100) : 0)
                      − (tokensPerLoad > budget ? min(35, (tokensPerLoad−budget)/budget·30) : 0)
+                     − min(20, compactionPerLoad·10)
 ```
 
 A failed load multiplies reliability instead of only halving it: a skill that
@@ -195,22 +207,37 @@ Harness"), so a stale process is visible where the user actually looks.
 
 Which loop stages feed the evidence, and which do not:
 
-| loop stage            | event                             | what the plugin does                                                                                           |
-| --------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| loop step             | `agent/pre-step` (waterfall)      | records the step number (parallel vs switched loads), then `next()` untouched                                  |
-| tool dispatch start   | `tools/pre-execute` (waterfall)   | timestamps `skill` loads only, then `next()` untouched                                                         |
-| tool dispatch end     | `tools/result` (emit)             | call/error counting per open window, skill load records, static capture                                        |
-| user turn opens       | `agent/inbox/claimed` (emit)      | reads the message for correction language, then closes the windows                                             |
-| turn about to close   | `agent/turn-stopping` (serial)    | persists a snapshot, keeps the window open for the follow-up message                                           |
-| step/turn error       | `agent/error` (emit)              | `loopErrors` + `lastLoopError` on every open window; costs up to 40% of reliability and raises a critical rule |
-| model request failure | `agent/request-error` (waterfall) | `llmRetries` per window, then `next()` untouched (the retry policy stays the host's)                           |
+| loop stage            | event                             | what the plugin does                                                                                            |
+| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| loop step             | `agent/pre-step` (waterfall)      | records the step number (parallel vs switched loads), then `next()` untouched                                   |
+| tool dispatch start   | `tools/pre-execute` (waterfall)   | timestamps `skill` loads only, then `next()` untouched                                                          |
+| tool dispatch end     | `tools/result` (emit)             | call/error counting per open window, skill load records, static capture                                         |
+| user turn opens       | `agent/inbox/claimed` (emit)      | reads the message for correction language, then closes the windows                                              |
+| turn about to close   | `agent/turn-stopping` (serial)    | persists a snapshot, keeps the window open for the follow-up message                                            |
+| step/turn error       | `agent/error` (emit)              | `loopErrors` + `lastLoopError` on every open window; costs up to 40% of reliability and raises a critical rule  |
+| model request failure | `agent/request-error` (waterfall) | `llmRetries` per window, then `next()` untouched (the retry policy stays the host's)                            |
+| durable session log   | `session/event` (emit)            | routes feedback, outcomes, approvals, compaction, model/preset and the rendered skill catalog into open windows |
 
 Token accounting **is** wired (`countTokens`): provider usage is attributed to
 the open windows and `tokensPerLoad` feeds the efficiency dimension and the
-token-cost advice. Deliberately **not** wired yet:
+token-cost advice. The durable event router adds:
 
-- **compaction** — a mid-window compaction does not break attribution, but the
-  window does not record that the model's context was rewritten.
+- `feedback/message-put` / `feedback/message-delete` — explicit ratings joined by
+  assistant message id; an edit replaces an earlier rating instead of double-counting.
+- `deliverables/presented`, `workspace/changes`, `job/settled`, `team/task`,
+  `tool-workflow/run-end` — positive outcome evidence.
+- `approval/asked` / `approval/decided` — approval friction.
+- `compaction/start` — context pressure, counted in efficiency.
+- `model/selection`, `agent-preset/selected`, `permission/preset`, `sandbox/mode` —
+  per-window attribution.
+- `user/message` with `source.kind === 'skill-catalog'` — the exact rendered
+  description the model sees plus the discovery-completeness flag.
+
+Deliberately **not** wired yet:
+
+- **subagent / team stratification** — child windows are recorded with
+  `agentKind`/`agentName` and excluded from root abandonment, but the score is
+  still aggregated across agent kinds.
 - **turn truncation from max tokens** — a turn that dies on the output limit is
   currently only visible through the following correction or error path.
 

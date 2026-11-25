@@ -51,6 +51,47 @@ export interface McpBucket {
   tools: Record<string, McpToolBucket>
 }
 
+/** Explicit message feedback joined onto the window that produced the message. */
+export interface WindowFeedback {
+  positive: number
+  negative: number
+  categories: Record<string, number>
+  notes: string[]
+}
+
+/** Positive outcome evidence observed inside the window (DSH durable events). */
+export interface WindowOutcomes {
+  deliverables: number
+  workspaceChanges: number
+  jobsSettled: number
+  jobsFailed: number
+  tasksCompleted: number
+  tasksFailed: number
+  workflowRuns: number
+}
+
+/** Approval friction caused by work inside the window. */
+export interface WindowApprovals {
+  asked: number
+  decided: number
+  rejected: number
+}
+
+/** Context pressure and safety context observed inside the window. */
+export interface WindowContext {
+  compactions: number
+  permissionPreset?: string | null
+  sandboxMode?: string | null
+}
+
+/** Model / preset attribution captured from the session event stream. */
+export interface WindowModel {
+  provider?: string | null
+  model?: string | null
+  effort?: string | null
+  preset?: string | null
+}
+
 /** One observation window after a skill load, as persisted (`t: 'window'`). */
 export interface WindowRecord {
   windowId?: string
@@ -67,6 +108,14 @@ export interface WindowRecord {
   corrections?: string[]
   otherSkills?: string[]
   origin?: string | null
+  agentName?: string | null
+  agentKind?: string | null
+  messageIds?: string[]
+  feedback?: WindowFeedback | null
+  outcomes?: WindowOutcomes | null
+  approvals?: WindowApprovals | null
+  context?: WindowContext | null
+  model?: WindowModel | null
   step?: number
   turnEnded?: boolean
   truncated?: boolean

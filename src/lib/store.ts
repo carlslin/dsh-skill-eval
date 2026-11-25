@@ -1,7 +1,16 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import type { McpBucket, StoredRecord, Tokens } from './types.ts'
+import type {
+  McpBucket,
+  StoredRecord,
+  Tokens,
+  WindowApprovals,
+  WindowContext,
+  WindowFeedback,
+  WindowModel,
+  WindowOutcomes,
+} from './types.ts'
 
 function expandHome(p: unknown): string | null {
   if (typeof p !== 'string' || p.length === 0) return null
@@ -377,6 +386,80 @@ export function sanitizeMcp(value: unknown): Record<string, McpBucket> {
   return out
 }
 
+const count0 = (value: unknown): number => {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+}
+
+function sanitizeFeedback(value: unknown): WindowFeedback | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  const categories: Record<string, number> = Object.create(null)
+  if (v.categories && typeof v.categories === 'object' && !Array.isArray(v.categories)) {
+    for (const [key, raw] of Object.entries(v.categories as Record<string, unknown>)) {
+      const n = count0(raw)
+      if (n > 0) categories[String(key).slice(0, 40)] = n
+    }
+  }
+  const notes = Array.isArray(v.notes)
+    ? v.notes
+        .filter((note): note is string => typeof note === 'string')
+        .slice(0, 4)
+        .map((note) => note.slice(0, 300))
+    : []
+  const positive = count0(v.positive)
+  const negative = count0(v.negative)
+  if (positive + negative === 0 && notes.length === 0 && Object.keys(categories).length === 0) return null
+  return { positive, negative, categories, notes }
+}
+
+function sanitizeOutcomes(value: unknown): WindowOutcomes | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  const out: WindowOutcomes = {
+    deliverables: count0(v.deliverables),
+    workspaceChanges: count0(v.workspaceChanges),
+    jobsSettled: count0(v.jobsSettled),
+    jobsFailed: count0(v.jobsFailed),
+    tasksCompleted: count0(v.tasksCompleted),
+    tasksFailed: count0(v.tasksFailed),
+    workflowRuns: count0(v.workflowRuns),
+  }
+  const total = Object.values(out).reduce((a, n) => a + n, 0)
+  return total > 0 ? out : null
+}
+
+function sanitizeApprovals(value: unknown): WindowApprovals | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  const out: WindowApprovals = { asked: count0(v.asked), decided: count0(v.decided), rejected: count0(v.rejected) }
+  return out.asked + out.decided + out.rejected > 0 ? out : null
+}
+
+function sanitizeContext(value: unknown): WindowContext | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  const out: WindowContext = {
+    compactions: count0(v.compactions),
+    permissionPreset: typeof v.permissionPreset === 'string' ? v.permissionPreset : null,
+    sandboxMode: typeof v.sandboxMode === 'string' ? v.sandboxMode : null,
+  }
+  return out.compactions > 0 || out.permissionPreset !== null || out.sandboxMode !== null ? out : null
+}
+
+function sanitizeModel(value: unknown): WindowModel | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  const text = (raw: unknown) => (typeof raw === 'string' && raw.length > 0 ? raw.slice(0, 80) : null)
+  const out: WindowModel = {
+    provider: text(v.provider),
+    model: text(v.model),
+    effort: text(v.effort),
+    preset: text(v.preset),
+  }
+  return out.provider || out.model || out.effort || out.preset ? out : null
+}
+
 export interface FoldedSample {
   at: number
   sessionId?: string
@@ -401,6 +484,14 @@ export interface FoldedSample {
     otherSkills: string[]
     turnEnded: boolean
     truncated: boolean
+    messageIds?: string[]
+    feedback?: WindowFeedback | null
+    outcomes?: WindowOutcomes | null
+    approvals?: WindowApprovals | null
+    context?: WindowContext | null
+    model?: WindowModel | null
+    agentName?: string | null
+    agentKind?: string | null
   } | null
 }
 
@@ -464,6 +555,16 @@ export function foldSamples(records: readonly StoredRecord[]) {
             otherSkills: Array.isArray(joined.otherSkills) ? joined.otherSkills : [],
             turnEnded: joined.turnEnded === true,
             truncated: joined.truncated === true,
+            messageIds: Array.isArray(joined.messageIds)
+              ? joined.messageIds.filter((id: unknown): id is string => typeof id === 'string').slice(0, 20)
+              : [],
+            feedback: sanitizeFeedback(joined.feedback),
+            outcomes: sanitizeOutcomes(joined.outcomes),
+            approvals: sanitizeApprovals(joined.approvals),
+            context: sanitizeContext(joined.context),
+            model: sanitizeModel(joined.model),
+            agentName: typeof joined.agentName === 'string' ? joined.agentName : null,
+            agentKind: typeof joined.agentKind === 'string' ? joined.agentKind : null,
           }
         : null,
     })

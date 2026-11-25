@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.24.0 — DSH evidence pipeline
+
+- **The durable session event stream is now routed, not just token usage.** The
+  recorder consumes `feedback/message-put` / `feedback/message-delete` /
+  `feedback/record` (explicit ratings), `deliverables/presented`,
+  `workspace/changes`, `job/settled`, `team/task`, `tool-workflow/run-end`
+  (outcome evidence), `approval/asked|decided` (friction), `compaction/start`
+  (context pressure), `model/selection`, `agent-preset/selected`,
+  `permission/preset` and `sandbox/mode` (attribution). The rendered skill
+  catalog message is captured too, including its discovery-completeness flag.
+- **Explicit feedback replaces text heuristics where it exists.** A negative
+  rating drives effectiveness directly; the next-user-message correction
+  heuristic remains only as a fallback. Ratings are joined by assistant message
+  id and an edited rating replaces the earlier one instead of double-counting.
+- **Outcome evidence counts.** A window that produced a deliverable, a workspace
+  change, a settled job, a completed team task or a workflow run is no longer
+  counted as abandoned just because it used no tool calls.
+- **Model / preset / agent attribution is recorded per window** (`model`,
+  `preset`, `agentKind`, `agentName`); markdown reports list the observed
+  models, presets, approvals and compactions.
+- **Authoring checks judge the rendered catalog description.** Description
+  length/trigger checks use the whitespace-normalized, catalog-capped text the
+  model actually sees; the invisible `whenToUse` field is no longer scored, a
+  new `catalog-truncated` check catches cues cut at the cap, and an incomplete
+  discovery (`snapshot().complete === false`) is surfaced as advice.
+- **New advice rules** for negative feedback, rejected approvals, context
+  compaction, catalog truncation and incomplete discovery (with Chinese copy).
+- Tests: **331 passing** (`npm test`).
+
 ## 1.23.1 — docs that speak plainly
 
 - **Both READMEs now lead with the story** instead of the rubric: what the plugin

@@ -1,8 +1,8 @@
 # dsh-skill-eval
 
-[![npm](https://img.shields.io/badge/npm-v1.23.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.24.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.23.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.24.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 A skill has no report card. This plugin keeps one.
 
@@ -51,12 +51,18 @@ More real-window screenshots and the per-screen notes:
 
 ## What goes into a score
 
-| dimension     | weight | signal                                                            |
-| ------------- | ------ | ----------------------------------------------------------------- |
-| static        | 0.30   | description, trigger cues, progressive disclosure, size, examples |
-| reliability   | 0.25   | load success × post-load tool error rate                          |
-| effectiveness | 0.30   | user corrections, ignored loads, sibling collisions               |
-| efficiency    | 0.15   | tool calls per run, load latency                                  |
+| dimension     | weight | signal                                                                                   |
+| ------------- | ------ | ---------------------------------------------------------------------------------------- |
+| static        | 0.30   | description, trigger cues, progressive disclosure, size, examples                        |
+| reliability   | 0.25   | load success × post-load tool error rate                                                 |
+| effectiveness | 0.30   | explicit ratings, text corrections, ignored loads, sibling collisions, produced outcomes |
+| efficiency    | 0.15   | tool calls per run, load latency, context compactions                                    |
+
+Evidence comes from the durable DSH event stream: `feedback/message-put` (explicit
+ratings), `deliverables/presented`, `workspace/changes`, `job/settled`,
+`team/task`, `approval/asked|decided`, `compaction/start`, `model/selection` and
+`agent-preset/selected`. Authoring checks score the rendered catalog
+description — whitespace-normalized and capped — not the raw frontmatter.
 
 Grades: `A ≥ 90`, `B ≥ 80`, `C ≥ 70`, `D ≥ 60`, `F < 60`.
 
@@ -257,8 +263,10 @@ stores `[redacted N chars]` instead of the user's text. See
 ## Known limits
 
 - Loads are recorded from `skill` tool calls and user-typed `/skill-name` invocations; a skill the harness activates without either is invisible.
-- Effectiveness is inferred from the next user message, not from a task verdict.
+- Explicit ratings win; without a rating, effectiveness falls back to the next user message. Outcome evidence counts deliverables, workspace changes, settled jobs and completed team tasks.
+- Subagent and team windows are recorded with `agentKind`/`agentName` but still aggregate into the same skill score.
+- Authoring checks use the rendered catalog description; the catalog cap is the host's default (500) unless the durable catalog message was captured.
 - Advice evidence keeps measured ids/numbers in English even in the Chinese UI; evidence tables escape Markdown so skill names and user text cannot break the report layout.
 - Telemetry is bounded to 8 MB (`events.jsonl` rotates to its newest half, keeping the `edit` audit ledger first). Step rows are the dominant growth in long sessions; per-skill trends keep the last 12 loads and runs keep the last 20 sessions.
 - Small samples never report strong significance: rate gates with fewer than 8 windows cap at `info`, and prune advice requires at least 6 loads (the configured `pruneMinLoads`, default 12) plus a bootstrap interval below the bar.
-- Privacy: user correction text is stored by default; set `redactCorrections: true` to keep only `[redacted N chars]`. Report/board reads reject cross-site fetch metadata.
+- Privacy: user correction text and explicit feedback notes are stored by default; set `redactCorrections: true` to keep only `[redacted N chars]`. Report/board reads reject cross-site fetch metadata.

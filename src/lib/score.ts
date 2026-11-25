@@ -108,6 +108,11 @@ export function median(nums: unknown[]): number | null {
 interface StaticView {
   name?: string
   description: string
+  /** Whitespace-normalized, catalog-capped description the model actually sees. */
+  catalogDescription: string
+  catalogTruncated: boolean
+  catalogComplete: boolean
+  modelInvocable: boolean
   whenToUse: string
   content: string
   bodyLines: number
@@ -129,6 +134,7 @@ export interface SkillSummary {
   provider?: string | null
   path?: string | null
   resourceBase?: { kind?: string; path?: string } | string | null
+  invocation?: { modelInvocable?: boolean; userInvocable?: boolean } | null
 }
 
 const STATIC_CHECKS: Array<{ id: string; weight: number; label: string; evaluate: (s: StaticView) => number | null }> =
@@ -136,9 +142,9 @@ const STATIC_CHECKS: Array<{ id: string; weight: number; label: string; evaluate
     {
       id: 'desc-length',
       weight: 12,
-      label: 'description length',
+      label: 'description length (as rendered in the catalog)',
       evaluate: (s) => {
-        const n = (s.description ?? '').length
+        const n = (s.catalogDescription ?? '').length
         if (n >= 60) return 1
         if (n >= 30) return 0.5
         return 0
@@ -147,15 +153,21 @@ const STATIC_CHECKS: Array<{ id: string; weight: number; label: string; evaluate
     {
       id: 'desc-trigger',
       weight: 12,
-      label: 'description states when to use it',
+      label: 'description states when to use it (as rendered)',
+      // A user-only skill never enters the model catalog; trigger language in
+      // its description cannot route the model, so the check is not scored.
       evaluate: (s) =>
-        /use when|when to use|triggers?|适用|适用于|当用户|用于|使用场景/i.test(s.description ?? '') ? 1 : 0,
+        s.modelInvocable
+          ? /use when|when to use|triggers?|适用|适用于|当用户|用于|使用场景/i.test(s.catalogDescription ?? '')
+            ? 1
+            : 0
+          : null,
     },
     {
-      id: 'when-to-use',
-      weight: 8,
-      label: 'explicit whenToUse field',
-      evaluate: (s) => ((s.whenToUse ?? '').trim().length > 0 ? 1 : 0),
+      id: 'catalog-truncated',
+      weight: 6,
+      label: 'description fits the model catalog cap',
+      evaluate: (s) => (s.catalogTruncated ? 0 : 1),
     },
     {
       id: 'body-present',
@@ -249,15 +261,38 @@ const STATIC_CHECKS: Array<{ id: string; weight: number; label: string; evaluate
 export function staticProfile(
   summary: SkillSummary | null | undefined,
   definition: { content?: unknown; path?: string | null } | null | undefined,
-  options: { integrity?: Integrity | null } = {},
+  options: {
+    integrity?: Integrity | null
+    /** Exact description from the durable session catalog, when captured. */
+    catalogDescription?: string
+    /** Whether the catalog discovery completed (ctx.skills.snapshot().complete). */
+    catalogComplete?: boolean
+  } = {},
 ) {
   if (!summary) return null
   const content = typeof definition?.content === 'string' ? definition.content : ''
   const bodyLines = content.length === 0 ? 0 : content.split('\n').length
   const sectionCount = (content.match(/^##\s+\S/gm) ?? []).length
+  const rawDescription = (summary.description ?? '').replace(/\s+/g, ' ').trim()
+  // DSH renders only name + description, whitespace-normalized and cut to the
+  // catalog cap (500 by default) with a trailing ellipsis. Without a captured
+  // catalog we reconstruct that shape so authoring checks cannot reward text
+  // the model never sees.
+  const reconstructed = rawDescription.length <= 500 ? rawDescription : `${rawDescription.slice(0, 497)}...`
+  const catalogDescription = typeof options.catalogDescription === 'string' ? options.catalogDescription : reconstructed
+  const catalogTruncated =
+    typeof options.catalogDescription === 'string'
+      ? options.catalogDescription.length < rawDescription.length
+      : rawDescription.length > 500
+  const invocation = summary.invocation
+  const modelInvocable = !invocation || invocation.modelInvocable !== false
   const view = {
     name: summary.name,
     description: summary.description ?? '',
+    catalogDescription,
+    catalogTruncated,
+    catalogComplete: options.catalogComplete !== false,
+    modelInvocable,
     whenToUse: summary.whenToUse ?? '',
     content,
     bodyLines,
@@ -336,7 +371,20 @@ export function aggregate(samples: unknown, options: { cacheReadWeight?: number 
   // A window force-closed for memory reasons is censored, not abandoned: it
   // must not turn "we ran out of tracked sessions" into an effectiveness claim.
   const abandonBase = (rootWindows.length > 0 ? rootWindows : windows).filter((w) => w.closeReason !== 'evicted')
-  const abandonedRoot = abandonBase.filter((w) => count(w.toolCalls) === 0).length
+  // A window that produced a deliverable, a workspace change, a settled job or
+  // a completed task is not "abandoned" just because it used no tool calls.
+  const abandonedRoot = abandonBase.filter((w) => {
+    if (count(w.toolCalls) > 0) return false
+    const o = w.outcomes
+    if (!o) return true
+    const produced =
+      (Number(o.deliverables) || 0) +
+      (Number(o.workspaceChanges) || 0) +
+      (Number(o.jobsSettled) || 0) +
+      (Number(o.tasksCompleted) || 0) +
+      (Number(o.workflowRuns) || 0)
+    return produced === 0
+  }).length
 
   const withLoopError = windows.filter((w) => count(w.loopErrors) > 0).length
   const loopErrors = windows.reduce((a, w) => a + count(w.loopErrors), 0)
@@ -426,6 +474,78 @@ export function aggregate(samples: unknown, options: { cacheReadWeight?: number 
   const tokenWindows = windows.filter((w) => w.tokens && (Number(w.tokens.calls) || 0) > 0).length
   const tokensPerLoad = tokenWindows > 0 && tokens.calls > 0 ? billable / tokenWindows : null
 
+  // Explicit feedback replaces the text-correction heuristic where it exists:
+  // ratings are first-class DSH events, editable and bound to a message id.
+  const feedback = { positive: 0, negative: 0, categories: {} as Record<string, number>, notes: [] as string[] }
+  const outcomes = {
+    deliverables: 0,
+    workspaceChanges: 0,
+    jobsSettled: 0,
+    jobsFailed: 0,
+    tasksCompleted: 0,
+    tasksFailed: 0,
+    workflowRuns: 0,
+  }
+  const approvals = { asked: 0, decided: 0, rejected: 0 }
+  const models: Record<string, number> = Object.create(null)
+  const presets: Record<string, number> = Object.create(null)
+  const agentKinds: Record<string, number> = Object.create(null)
+  let compactions = 0
+  const withOutcome = (w: WindowRecord) => {
+    const o = w.outcomes
+    if (!o) return false
+    return (
+      (Number(o.deliverables) || 0) +
+        (Number(o.workspaceChanges) || 0) +
+        (Number(o.jobsSettled) || 0) +
+        (Number(o.tasksCompleted) || 0) +
+        (Number(o.workflowRuns) || 0) >
+      0
+    )
+  }
+  let outcomeWindows = 0
+  let compactionWindows = 0
+  for (const w of windows) {
+    const f = w.feedback
+    if (f && typeof f === 'object') {
+      feedback.positive += Number(f.positive) || 0
+      feedback.negative += Number(f.negative) || 0
+      for (const [category, count] of Object.entries(f.categories ?? {})) {
+        if (!category) continue
+        feedback.categories[category] = (feedback.categories[category] ?? 0) + (Number(count) || 0)
+      }
+      for (const note of Array.isArray(f.notes) ? f.notes : []) {
+        if (typeof note === 'string' && note && feedback.notes.length < 4) feedback.notes.push(note)
+      }
+    }
+    const o = w.outcomes
+    if (o && typeof o === 'object') {
+      for (const key of Object.keys(outcomes) as Array<keyof typeof outcomes>) {
+        outcomes[key] += Number(o[key]) || 0
+      }
+      if (withOutcome(w)) outcomeWindows += 1
+    }
+    const a = w.approvals
+    if (a && typeof a === 'object') {
+      approvals.asked += Number(a.asked) || 0
+      approvals.decided += Number(a.decided) || 0
+      approvals.rejected += Number(a.rejected) || 0
+    }
+    const c = w.context
+    if (c && typeof c === 'object') {
+      compactions += Number(c.compactions) || 0
+      if ((Number(c.compactions) || 0) > 0) compactionWindows += 1
+    }
+    const m = w.model
+    if (m && typeof m === 'object') {
+      const modelKey = [m.provider, m.model].filter((x) => typeof x === 'string' && x).join('/') || 'unknown'
+      models[modelKey] = (models[modelKey] ?? 0) + 1
+      if (typeof m.preset === 'string' && m.preset) presets[m.preset] = (presets[m.preset] ?? 0) + 1
+    }
+    if (typeof w.agentKind === 'string' && w.agentKind) agentKinds[w.agentKind] = (agentKinds[w.agentKind] ?? 0) + 1
+  }
+  const feedbackTotal = feedback.positive + feedback.negative
+
   return {
     loads,
     closed: closed.length,
@@ -457,6 +577,18 @@ export function aggregate(samples: unknown, options: { cacheReadWeight?: number 
     corrections: corrections.slice(-5),
     siblings,
     errorNames,
+    feedback,
+    feedbackTotal,
+    feedbackNegativeRate: feedbackTotal > 0 ? feedback.negative / feedbackTotal : null,
+    outcomes,
+    outcomeRate: windows.length > 0 ? outcomeWindows / windows.length : null,
+    approvals,
+    compactions,
+    compactionWindows,
+    compactionPerLoad: windows.length > 0 ? compactions / windows.length : null,
+    models,
+    presets,
+    agentKinds,
   }
 }
 
@@ -483,10 +615,17 @@ function reliabilityScore(stats: Stats): number | null {
 function effectivenessScore(stats: Stats): number | null {
   if (stats.closed === 0) return null
   let score = 100
-  score -= 45 * (stats.correctionRate ?? 0)
+  // Explicit ratings are the strongest effectiveness signal. Text corrections
+  // remain the fallback only where no rating exists, so a liked run cannot be
+  // dragged down by an unrelated follow-up message.
+  if (stats.feedbackTotal > 0) score -= 50 * (stats.feedbackNegativeRate ?? 0)
+  else score -= 45 * (stats.correctionRate ?? 0)
   score -= 25 * (stats.abandonRate ?? 0)
   score -= 20 * (stats.siblingRate ?? 0)
   score -= 10 * clamp(stats.errRate ?? 0, 0, 1)
+  // Deliverables, workspace changes, settled jobs and completed team tasks are
+  // positive outcome evidence: work that produced something beats silence.
+  score += 8 * (stats.outcomeRate ?? 0)
   return clamp(score, 0, 100)
 }
 
@@ -503,6 +642,10 @@ function efficiencyScore(stats: Stats, tokenBudgetPerLoad = 20000): number | nul
   if (perLoad !== null && Number.isFinite(perLoad) && perLoad > tokenBudgetPerLoad) {
     score -= Math.min(35, ((perLoad - tokenBudgetPerLoad) / tokenBudgetPerLoad) * 30)
   }
+  // Context pressure is real cost: a load that forces compaction burns the
+  // window's working memory. One compaction per load costs up to 20 points.
+  const compactionPerLoad = stats.compactionPerLoad ?? 0
+  if (compactionPerLoad > 0) score -= Math.min(20, compactionPerLoad * 10)
   return clamp(score, 0, 100)
 }
 

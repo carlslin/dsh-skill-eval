@@ -271,6 +271,39 @@ export function renderSkillMarkdown(entry: SkillEntry): string {
   lines.push(`- ignored-after-load rate: ${pct(entry.stats.abandonRate)}`)
   lines.push(`- sibling skill loaded in same window: ${pct(entry.stats.siblingRate)}`)
   lines.push(`- median load time: ${fmt(entry.stats.p50LoadMs, 0)} ms`)
+  if (entry.stats.feedbackTotal > 0) {
+    lines.push(
+      `- explicit feedback: +${entry.stats.feedback.positive} / -${entry.stats.feedback.negative} (${pct(
+        entry.stats.feedbackNegativeRate,
+      )} negative)`,
+    )
+  }
+  const outcomes = entry.stats.outcomes
+  const produced =
+    (outcomes?.deliverables ?? 0) +
+    (outcomes?.workspaceChanges ?? 0) +
+    (outcomes?.jobsSettled ?? 0) +
+    (outcomes?.tasksCompleted ?? 0) +
+    (outcomes?.workflowRuns ?? 0)
+  if (produced > 0) {
+    lines.push(
+      `- outcome evidence: ${outcomes.deliverables} deliverable(s), ${outcomes.workspaceChanges} workspace change(s), ${outcomes.jobsSettled} settled job(s), ${outcomes.tasksCompleted} completed task(s)`,
+    )
+  }
+  if (entry.stats.approvals.asked > 0 || entry.stats.approvals.rejected > 0) {
+    lines.push(
+      `- approvals: ${entry.stats.approvals.asked} asked, ${entry.stats.approvals.rejected} rejected of ${entry.stats.approvals.decided} decided`,
+    )
+  }
+  if (entry.stats.compactions > 0) {
+    lines.push(`- context compactions: ${entry.stats.compactions} in ${entry.stats.compactionWindows} window(s)`)
+  }
+  const modelKeys = Object.keys(entry.stats.models ?? {})
+  if (modelKeys.length > 0) {
+    lines.push(`- models observed: ${modelKeys.slice(0, 3).join(', ')}`)
+  }
+  const presetKeys = Object.keys(entry.stats.presets ?? {})
+  if (presetKeys.length > 0) lines.push(`- presets observed: ${presetKeys.slice(0, 3).join(', ')}`)
   if (entry.staticQuality) {
     lines.push('')
     lines.push(

@@ -257,10 +257,16 @@ function makeResolveSkill(ctx: Host): ResolveSkill {
     ]
     for (const options of attempts) {
       try {
-        const summary = (await ctx.skills.list(options)).find((s: Host) => s.name === skillName)
+        // snapshot() keeps the discovery-completeness flag list() drops; an
+        // incomplete catalog must mark the score provisional, not absent.
+        const snapshot =
+          typeof ctx.skills.snapshot === 'function'
+            ? await ctx.skills.snapshot(options)
+            : { skills: await ctx.skills.list(options), complete: true }
+        const summary = (snapshot?.skills ?? []).find((s: Host) => s.name === skillName)
         if (!summary) continue
         const definition = await ctx.skills.get(skillName, options)
-        return { summary, definition }
+        return { summary, definition, catalogComplete: snapshot?.complete !== false }
       } catch {
         // try the next lookup shape
       }

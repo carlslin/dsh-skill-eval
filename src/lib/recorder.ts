@@ -4,7 +4,16 @@ import { checkReferences } from './integrity.ts'
 import { isCorrection, staticProfile } from './score.ts'
 import type { SkillSummary } from './score.ts'
 import type { EventStore } from './store.ts'
-import type { Host, McpBucket, Tokens } from './types.ts'
+import type {
+  Host,
+  McpBucket,
+  Tokens,
+  WindowApprovals,
+  WindowContext,
+  WindowFeedback,
+  WindowModel,
+  WindowOutcomes,
+} from './types.ts'
 
 const MAX_TRACKED_SESSIONS = 128
 
@@ -65,6 +74,63 @@ function nowMs() {
   return Date.now()
 }
 
+const emptyFeedback = (): WindowFeedback => ({ positive: 0, negative: 0, categories: Object.create(null), notes: [] })
+const emptyOutcomes = (): WindowOutcomes => ({
+  deliverables: 0,
+  workspaceChanges: 0,
+  jobsSettled: 0,
+  jobsFailed: 0,
+  tasksCompleted: 0,
+  tasksFailed: 0,
+  workflowRuns: 0,
+})
+const emptyApprovals = (): WindowApprovals => ({ asked: 0, decided: 0, rejected: 0 })
+const emptyContext = (): WindowContext => ({ compactions: 0, permissionPreset: null, sandboxMode: null })
+
+/** Managed child agents are named; root sessions usually are not. */
+function agentNameOf(agent: Host): string | null {
+  try {
+    const name = agent?.name ?? agent?.session?.header?.agentName ?? null
+    return typeof name === 'string' && name.length > 0 ? name.slice(0, 80) : null
+  } catch {
+    return null
+  }
+}
+
+function hasFeedback(f: WindowFeedback): boolean {
+  return f.positive + f.negative > 0 || f.notes.length > 0 || Object.keys(f.categories).length > 0
+}
+function hasOutcomes(o: WindowOutcomes): boolean {
+  return Object.values(o).some((n) => n > 0)
+}
+function hasApprovals(a: WindowApprovals): boolean {
+  return a.asked + a.decided + a.rejected > 0
+}
+function hasContext(c: WindowContext): boolean {
+  return c.compactions > 0 || c.permissionPreset !== null || c.sandboxMode !== null
+}
+function hasModel(m: WindowModel): boolean {
+  return Boolean(m.provider || m.model || m.effort || m.preset)
+}
+
+function agentKindOf(origin: string | null): string {
+  if (!origin) return 'root'
+  if (origin === 'subagent' || origin === 'child') return 'subagent'
+  return origin
+}
+
+interface SessionMeta {
+  model: WindowModel
+  permissionPreset: string | null
+  sandboxMode: string | null
+  agentName: string | null
+  /** Rendered catalog description per skill, captured from the durable skill catalog. */
+  catalog: Map<string, string>
+  catalogComplete: boolean
+  /** Whether a durable catalog message was actually observed this session. */
+  catalogSeen: boolean
+}
+
 interface LiveWindow {
   windowId: string
   sessionId: string
@@ -83,6 +149,14 @@ interface LiveWindow {
   truncated: boolean
   step: number | undefined
   origin: string | null
+  agentName: string | null
+  agentKind: string
+  messageIds: string[]
+  feedback: WindowFeedback
+  outcomes: WindowOutcomes
+  approvals: WindowApprovals
+  context: WindowContext
+  model: WindowModel
   openedAt: number
   lastActivityAt: number
   flushed: boolean
@@ -112,7 +186,12 @@ export type ResolveSkill = (
   skill: string,
   agent: Host,
   signal?: AbortSignal,
-) => Promise<{ summary?: SkillSummary; definition?: { content?: unknown; path?: string | null } } | null>
+) => Promise<{
+  summary?: SkillSummary
+  definition?: { content?: unknown; path?: string | null }
+  /** ctx.skills.snapshot().complete — false when some provider failed discovery. */
+  catalogComplete?: boolean
+} | null>
 
 export interface RecorderConfig {
   windowToolCalls?: number
@@ -154,6 +233,23 @@ export function createRecorder(
   // one loop step are concurrent use, so their follow-up work counts for each of
   // them instead of being handed to whichever loaded last.
   const sessions = new Map<string, SessionState>() // sessionId -> { windows: [] }
+  const sessionMeta = new Map<string, SessionMeta>()
+
+  function metaFor(sessionId: string): SessionMeta {
+    const existing = sessionMeta.get(sessionId)
+    if (existing) return existing
+    const created: SessionMeta = {
+      model: {},
+      permissionPreset: null,
+      sandboxMode: null,
+      agentName: null,
+      catalog: new Map(),
+      catalogComplete: true,
+      catalogSeen: false,
+    }
+    sessionMeta.set(sessionId, created)
+    return created
+  }
 
   const windowLimit = () => Math.max(1, Number(config.windowToolCalls ?? 12))
   // Read live: the settings form advertises windowToolCalls/windowTtlMs as applying immediately.
@@ -188,6 +284,7 @@ export function createRecorder(
         sessions.delete(oldest)
         steps.delete(oldest)
         turns.delete(oldest)
+        sessionMeta.delete(oldest)
       }
     }
     const state: SessionState = { windows: [], lastAt: nowMs() }
@@ -226,6 +323,14 @@ export function createRecorder(
       step: w.step,
       turnEnded: w.turnEnded,
       truncated: w.truncated,
+      agentName: w.agentName,
+      agentKind: w.agentKind,
+      messageIds: w.messageIds.slice(0, 20),
+      feedback: hasFeedback(w.feedback) ? w.feedback : undefined,
+      outcomes: hasOutcomes(w.outcomes) ? w.outcomes : undefined,
+      approvals: hasApprovals(w.approvals) ? w.approvals : undefined,
+      context: hasContext(w.context) ? w.context : undefined,
+      model: hasModel(w.model) ? w.model : undefined,
       closeReason,
     })
   }
@@ -244,6 +349,7 @@ export function createRecorder(
     callId: unknown,
     step: number | undefined,
     origin: string | null,
+    agentName?: string | null,
   ): void {
     const current = state.windows[state.windows.length - 1]
     if (current) {
@@ -258,6 +364,7 @@ export function createRecorder(
         closeWindows(state, 'superseded')
       }
     }
+    const meta = metaFor(sessionId)
     state.windows.push({
       windowId: `${sessionId}:${callId}`,
       sessionId,
@@ -276,6 +383,14 @@ export function createRecorder(
       truncated: false,
       step,
       origin,
+      agentName: agentName ?? meta.agentName,
+      agentKind: agentKindOf(origin),
+      messageIds: [],
+      feedback: emptyFeedback(),
+      outcomes: emptyOutcomes(),
+      approvals: emptyApprovals(),
+      context: { ...emptyContext(), permissionPreset: meta.permissionPreset, sandboxMode: meta.sandboxMode },
+      model: { ...meta.model },
       openedAt: nowMs(),
       lastActivityAt: nowMs(),
       flushed: false,
@@ -287,7 +402,73 @@ export function createRecorder(
    * catalog is layered per agent scope, and by then no agent is available. So
    * resolve it once, at load time, while `exec.agent` is still in hand.
    */
-  async function captureStatic(skill: string, agent: Host, signal: AbortSignal | undefined, fallbackContent: unknown) {
+  /**
+   * The model-facing catalog is a durable user message: it carries the exact
+   * rendered description (whitespace-normalized, truncated to the configured
+   * cap) plus the discovery-completeness flag. Capture it so authoring checks
+   * judge what the model actually sees instead of the raw frontmatter.
+   */
+  function recordCatalog(sessionId: string, messages: Host): void {
+    if (!Array.isArray(messages)) return
+    const meta = metaFor(sessionId)
+    for (const message of messages) {
+      if (!message || typeof message !== 'object') continue
+      const source = message.source
+      if (!source || source.kind !== 'skill-catalog' || !Array.isArray(source.entries)) continue
+      if (source.form === 'catalog') meta.catalog.clear()
+      for (const entry of source.entries) {
+        if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string') continue
+        meta.catalog.set(entry.name, typeof entry.description === 'string' ? entry.description : '')
+      }
+      meta.catalogComplete = source.incomplete !== true
+      meta.catalogSeen = true
+      return
+    }
+  }
+
+  function catalogHint(sessionId: string, skill: string): { description?: string; complete?: boolean } {
+    const meta = metaFor(sessionId)
+    return { description: meta.catalog.get(skill), complete: meta.catalogSeen ? meta.catalogComplete : undefined }
+  }
+
+  // Latest explicit feedback per assistant message. Feedback is an editable
+  // log: a put can replace an earlier rating, so windows are recomputed from
+  // the current map instead of incrementing counters per event.
+  const feedbackByMessage = new Map<string, { rating: string; category: string | null; note: string | null }>()
+
+  function noteText(text: string): string {
+    return config.redactCorrections === true ? `[redacted ${text.length} chars]` : text.slice(0, 300)
+  }
+
+  function refreshFeedback(w: LiveWindow): void {
+    const feedback = emptyFeedback()
+    for (const id of w.messageIds) {
+      const item = feedbackByMessage.get(`${w.sessionId}|${id}`)
+      if (!item) continue
+      if (item.rating === 'positive') feedback.positive += 1
+      else if (item.rating === 'negative') feedback.negative += 1
+      if (item.category) feedback.categories[item.category] = (feedback.categories[item.category] ?? 0) + 1
+      if (item.note && feedback.notes.length < 4) feedback.notes.push(noteText(item.note))
+    }
+    w.feedback = feedback
+  }
+
+  function failureStatus(data: Host): string {
+    const raw = data?.status ?? data?.outcome ?? data?.state ?? data?.kind ?? ''
+    return typeof raw === 'string' ? raw.toLowerCase() : ''
+  }
+
+  function isFailure(status: string): boolean {
+    return /fail|error|cancel|timeout|reject|den(y|ied)|refus|abort/.test(status)
+  }
+
+  async function captureStatic(
+    skill: string,
+    agent: Host,
+    signal: AbortSignal | undefined,
+    fallbackContent: unknown,
+    catalog?: { description?: string; complete?: boolean },
+  ) {
     try {
       if (typeof resolveSkill !== 'function') return
       let resolved = null
@@ -322,7 +503,11 @@ export function createRecorder(
       } catch {
         integrity = null
       }
-      const profile = staticProfile(summary, definition, { integrity })
+      const profile = staticProfile(summary, definition, {
+        integrity,
+        catalogDescription: catalog?.description,
+        catalogComplete: catalog?.complete ?? resolved?.catalogComplete,
+      })
       if (!profile) return
       await store.append({
         t: 'static',
@@ -394,6 +579,9 @@ export function createRecorder(
    */
   function recordInvocations(sessionId: string, messages: Host, agent: Host): void {
     if (!Array.isArray(messages)) return
+    recordCatalog(sessionId, messages)
+    const meta = metaFor(sessionId)
+    if (!meta.agentName) meta.agentName = agentNameOf(agent)
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue
       const source = message.source
@@ -430,8 +618,8 @@ export function createRecorder(
         turn: turns.get(sessionId),
         windowId,
       })
-      openWindow(state, skill, sessionId, id, steps.get(sessionId), originOf(agent))
-      trackStatic(captureStatic(skill, agent, undefined, undefined))
+      openWindow(state, skill, sessionId, id, steps.get(sessionId), originOf(agent), agentNameOf(agent))
+      trackStatic(captureStatic(skill, agent, undefined, undefined, catalogHint(sessionId, skill)))
     }
   }
 
@@ -575,13 +763,22 @@ export function createRecorder(
             windowId,
           })
           if (ok) {
-            openWindow(state, skill, sessionId, exec.callId, steps.get(sessionId), originOf(exec.agent))
+            openWindow(
+              state,
+              skill,
+              sessionId,
+              exec.callId,
+              steps.get(sessionId),
+              originOf(exec.agent),
+              agentNameOf(exec.agent),
+            )
             trackStatic(
               captureStatic(
                 skill,
                 exec.agent,
                 exec.signal,
                 result?.value && typeof result.value.content === 'string' ? result.value.content : undefined,
+                catalogHint(sessionId, skill),
               ),
             )
           }
@@ -689,31 +886,196 @@ export function createRecorder(
   offs.push(
     ctx.on('session/event', (session: Host, event: Host) => {
       try {
-        if (config.countTokens === false || !event || event.type !== 'assistant/message') return
-        const usage = event.data && event.data.usage
-        if (!usage || typeof usage !== 'object') return
+        if (!event || typeof event.type !== 'string') return
         const sessionId = session && session.id ? String(session.id) : null
         if (!sessionId) return
+        const data = event.data && typeof event.data === 'object' ? event.data : {}
+        const meta = metaFor(sessionId)
         const state = sessions.get(sessionId)
-        const step = stepStats.get(sessionId)
-        if (step) {
-          step.tokens.input += Number(usage.inputTokens) || 0
-          step.tokens.output += Number(usage.outputTokens) || 0
-          step.tokens.cacheRead += Number(usage.cacheReadTokens) || 0
-          step.tokens.calls += 1
+        const windows = state?.windows ?? []
+        const each = (fn: (w: LiveWindow) => void) => {
+          for (const w of windows) fn(w)
         }
-        if (!state || state.windows.length === 0) return
-        const share = 1 / state.windows.length
-        for (const w of state.windows) {
-          const bucket = w.tokens ?? { input: 0, output: 0, cacheRead: 0, calls: 0 }
-          bucket.input += (Number(usage.inputTokens) || 0) * share
-          bucket.output += (Number(usage.outputTokens) || 0) * share
-          bucket.cacheRead += (Number(usage.cacheReadTokens) || 0) * share
-          bucket.calls += 1
-          w.tokens = bucket
+
+        switch (event.type) {
+          case 'assistant/message': {
+            if (config.countTokens !== false) {
+              const usage = data.usage
+              if (usage && typeof usage === 'object') {
+                const step = stepStats.get(sessionId)
+                if (step) {
+                  step.tokens.input += Number(usage.inputTokens) || 0
+                  step.tokens.output += Number(usage.outputTokens) || 0
+                  step.tokens.cacheRead += Number(usage.cacheReadTokens) || 0
+                  step.tokens.calls += 1
+                }
+                if (windows.length > 0) {
+                  const share = 1 / windows.length
+                  for (const w of windows) {
+                    w.tokens.input += (Number(usage.inputTokens) || 0) * share
+                    w.tokens.output += (Number(usage.outputTokens) || 0) * share
+                    w.tokens.cacheRead += (Number(usage.cacheReadTokens) || 0) * share
+                    w.tokens.calls += 1
+                  }
+                }
+              }
+            }
+            const message = data.message && typeof data.message === 'object' ? data.message : null
+            const source = message && message.source && typeof message.source === 'object' ? message.source : null
+            const messageId =
+              (message && typeof message.id === 'string' && message.id) ||
+              (typeof data.messageId === 'string' ? data.messageId : null)
+            if (messageId) {
+              each((w) => {
+                if (!w.messageIds.includes(messageId) && w.messageIds.length < 20) w.messageIds.push(messageId)
+              })
+            }
+            if (source) {
+              const provider = typeof source.provider === 'string' ? source.provider : null
+              const model = typeof source.model === 'string' ? source.model : null
+              if (provider || model) {
+                each((w) => {
+                  w.model = { ...w.model, ...(provider ? { provider } : {}), ...(model ? { model } : {}) }
+                })
+              }
+            }
+            break
+          }
+          case 'model/selection': {
+            const model = {
+              provider: typeof data.provider === 'string' ? data.provider : null,
+              model: typeof data.model === 'string' ? data.model : null,
+              effort:
+                typeof data.reasoningEffort === 'string'
+                  ? data.reasoningEffort
+                  : typeof data.effort === 'string'
+                    ? data.effort
+                    : null,
+            }
+            meta.model = { ...meta.model, ...model }
+            each((w) => {
+              w.model = { ...w.model, ...model }
+            })
+            break
+          }
+          case 'agent-preset/selected': {
+            const preset = typeof data.agentPreset === 'string' ? data.agentPreset : null
+            if (preset) {
+              meta.model = { ...meta.model, preset }
+              each((w) => {
+                w.model = { ...w.model, preset }
+              })
+            }
+            break
+          }
+          case 'permission/preset': {
+            const preset = typeof data.preset === 'string' ? data.preset : null
+            meta.permissionPreset = preset
+            each((w) => {
+              w.context.permissionPreset = preset
+            })
+            break
+          }
+          case 'sandbox/mode': {
+            const mode = typeof data.mode === 'string' ? data.mode : null
+            meta.sandboxMode = mode
+            each((w) => {
+              w.context.sandboxMode = mode
+            })
+            break
+          }
+          case 'feedback/message-put': {
+            const item = data.item && typeof data.item === 'object' ? data.item : null
+            const messageId = item && typeof item.messageId === 'string' ? item.messageId : null
+            if (!item || !messageId) break
+            const rating = item.rating === 'positive' || item.rating === 'negative' ? item.rating : null
+            if (!rating) break
+            feedbackByMessage.set(`${sessionId}|${messageId}`, {
+              rating,
+              category: typeof item.category === 'string' ? item.category.slice(0, 40) : null,
+              note: typeof item.note === 'string' && item.note.trim().length > 0 ? item.note.slice(0, 300) : null,
+            })
+            for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            break
+          }
+          case 'feedback/message-delete': {
+            const messageId = typeof data.messageId === 'string' ? data.messageId : null
+            if (!messageId) break
+            feedbackByMessage.delete(`${sessionId}|${messageId}`)
+            for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            break
+          }
+          case 'feedback/record': {
+            const text = typeof data.text === 'string' ? data.text.trim() : ''
+            const category = typeof data.category === 'string' ? data.category.slice(0, 40) : null
+            if (!text && !category) break
+            each((w) => {
+              if (text && w.feedback.notes.length < 4) w.feedback.notes.push(noteText(text))
+              if (category)
+                w.feedback.categories[`session:${category}`] = (w.feedback.categories[`session:${category}`] ?? 0) + 1
+            })
+            break
+          }
+          case 'deliverables/presented':
+            each((w) => {
+              w.outcomes.deliverables += 1
+            })
+            break
+          case 'workspace/changes':
+            each((w) => {
+              w.outcomes.workspaceChanges += 1
+            })
+            break
+          case 'job/settled': {
+            const failed = isFailure(failureStatus(data))
+            each((w) => {
+              if (failed) w.outcomes.jobsFailed += 1
+              else w.outcomes.jobsSettled += 1
+            })
+            break
+          }
+          case 'team/task': {
+            const task = data.task && typeof data.task === 'object' ? data.task : data
+            const status = failureStatus(task)
+            const completed = /complete|done|success/.test(status)
+            const failed = isFailure(status)
+            if (!completed && !failed) break
+            each((w) => {
+              if (failed) w.outcomes.tasksFailed += 1
+              else w.outcomes.tasksCompleted += 1
+            })
+            break
+          }
+          case 'tool-workflow/run-end': {
+            if (isFailure(failureStatus(data))) break
+            each((w) => {
+              w.outcomes.workflowRuns += 1
+            })
+            break
+          }
+          case 'approval/asked':
+            each((w) => {
+              w.approvals.asked += 1
+            })
+            break
+          case 'approval/decided': {
+            const rejected = isFailure(failureStatus(data))
+            each((w) => {
+              w.approvals.decided += 1
+              if (rejected) w.approvals.rejected += 1
+            })
+            break
+          }
+          case 'compaction/start':
+            each((w) => {
+              w.context.compactions += 1
+            })
+            break
+          default:
+            break
         }
       } catch {
-        // token accounting is best effort
+        // telemetry must never break the session
       }
     }),
   )
@@ -750,6 +1112,8 @@ export function createRecorder(
       sessions.clear()
       steps.clear()
       turns.clear()
+      sessionMeta.clear()
+      feedbackByMessage.clear()
       seenInvocations.clear()
       // let every queued write land before the caller tears the store down,
       // including the fire-and-forget static captures above

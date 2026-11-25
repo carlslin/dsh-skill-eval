@@ -43,6 +43,26 @@ const ADVICE_ZH: Record<string, { title: string; fix: string }> = {
     title: '用户在该技能运行后立即否定结果',
     fix: '正文很可能忽略了已声明的约束。收紧输出契约和"不要做什么"清单，并加一段回答前的自检。',
   },
+  'negative-feedback': {
+    title: '用户明确点了“不满意”',
+    fix: '先看反馈分类：如果是输出错误，收紧输出契约与自检；如果是不适用，补反触发；如果是太慢/太贵，精简正文或延后加载。',
+  },
+  'approval-friction': {
+    title: '该技能运行伴随着审批被拒',
+    fix: '正文在教模型做需要审批（或被拒）的操作。把它改成只读/可回滚的步骤，或在正文里写明需要的授权与替代路径。',
+  },
+  'context-compaction': {
+    title: '加载该技能后上下文被压缩',
+    fix: '技能正文或它带出的工具结果把上下文顶爆了。把长参考资料移到 references/，让默认加载保持精简，或拆成更小的技能。',
+  },
+  'catalog-truncated': {
+    title: '描述超出模型目录上限，后半段从未被看到',
+    fix: '把最重要的触发线索（做什么、何时用、反触发）放进前 500 个字符；超出部分移到正文或 references/。',
+  },
+  'catalog-incomplete': {
+    title: '技能目录发现不完整',
+    fix: '某个 provider 读取失败，当前分数只覆盖看得见的技能。修复加载失败的技能目录/权限后重测，别把这轮当完整基线。',
+  },
   'dead-load': {
     title: '加载的技能经常被忽略',
     fix: '让技能首屏变成命令式清单（“第 1 步用工具 Y 做 X”）。只讲背景的正文会被读完就丢。',
@@ -189,6 +209,10 @@ interface StaticInput {
   resolved?: boolean
   name?: string
   description?: string
+  catalogDescription?: string
+  catalogTruncated?: boolean
+  catalogComplete?: boolean
+  modelInvocable?: boolean
   bodyLines?: number
   integrity?: { checked?: number; missing?: string[] } | null
   failedChecks?: Array<{ id: string; fraction: number }>
@@ -442,6 +466,32 @@ export function buildAdvice({
   // ---- authoring (static) rules ----------------------------------------
 
   if (sp) {
+    if (sp.catalogTruncated) {
+      out.push({
+        id: 'catalog-truncated',
+        severity: 'warning',
+        dimension: 'static',
+        title: 'Description is cut off in the model catalog',
+        evidence:
+          'raw description is ' +
+          String(sp.description ?? '').length +
+          ' chars but the model only sees ' +
+          String(sp.catalogDescription ?? '').length +
+          ' (whitespace-normalized, catalog-capped)',
+        fix: 'Put the essential trigger cues in the first 500 characters; move the rest into the body or references/. Text past the cap cannot affect routing.',
+      })
+    }
+    if (sp.catalogComplete === false) {
+      out.push({
+        id: 'catalog-incomplete',
+        severity: 'info',
+        dimension: 'confidence',
+        title: 'Skill catalog discovery was incomplete',
+        evidence:
+          'at least one provider failed discovery when this profile was captured; scores cover the visible skills only',
+        fix: 'Fix the failing skill root/permissions and re-measure before treating this round as a complete baseline.',
+      })
+    }
     for (const check of sp.failedChecks ?? []) {
       if (check.id === 'body-compact' && check.fraction <= 0.5) {
         out.push({
@@ -459,7 +509,7 @@ export function buildAdvice({
           severity: 'warning',
           dimension: 'static',
           title: 'Description is too short to trigger reliably',
-          evidence: `description is ${String(sp.description ?? '').length} chars`,
+          evidence: `description is ${String(sp.catalogDescription ?? sp.description ?? '').length} chars as rendered in the catalog`,
           fix: 'State the capability, the situation that calls for it, and the objects it operates on — in the description itself, not only in the body.',
         })
       }
@@ -469,7 +519,7 @@ export function buildAdvice({
           severity: 'warning',
           dimension: 'static',
           title: 'Description never says when to use the skill',
-          evidence: `description: “${String(sp.description ?? '').slice(0, 120)}”`,
+          evidence: `description: “${String(sp.catalogDescription ?? sp.description ?? '').slice(0, 120)}”`,
           fix: 'Add a "Use when …" clause with the concrete user phrasings that should activate it.',
         })
       }
@@ -543,6 +593,61 @@ export function buildAdvice({
       title: 'Skill definition could not be resolved',
       evidence: 'the skill is not in the current catalog (removed, renamed, or provider offline)',
       fix: 'Confirm the skill still exists before acting on the runtime numbers.',
+    })
+  }
+
+  if (stats.feedbackTotal >= 2 && (stats.feedbackNegativeRate ?? 0) > 0.4) {
+    const categories = Object.entries(stats.feedback.categories ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => name + '×' + count)
+    out.push({
+      id: 'negative-feedback',
+      severity: (stats.feedbackNegativeRate ?? 0) >= 0.6 && stats.feedbackTotal >= 3 ? 'critical' : 'warning',
+      dimension: 'effectiveness',
+      title: 'Users rate this skill negatively',
+      evidence:
+        String(stats.feedback.negative) +
+        '/' +
+        String(stats.feedbackTotal) +
+        ' explicit ratings are negative' +
+        (categories.length ? ' (' + categories.join(', ') + ')' : '') +
+        ' — measured from DSH message feedback, not text heuristics',
+      fix: 'Read the feedback categories first: for wrong output tighten the output contract and self-check; for "not applicable" add anti-triggers; for slow/expensive trim the body or defer the load.',
+    })
+  }
+
+  if (stats.approvals.rejected >= 2 && stats.approvals.decided > 0) {
+    out.push({
+      id: 'approval-friction',
+      severity: 'warning',
+      dimension: 'effectiveness',
+      title: 'Work from this skill keeps getting denied at approval',
+      evidence:
+        String(stats.approvals.rejected) +
+        '/' +
+        String(stats.approvals.decided) +
+        ' decided approvals were rejected (' +
+        String(stats.approvals.asked) +
+        ' asked)',
+      fix: 'The body likely teaches an action that needs permission or gets refused. Make the default path read-only/reversible, or state the required authorization and the fallback explicitly.',
+    })
+  }
+
+  if (stats.compactions >= 2 && (stats.compactionPerLoad ?? 0) >= 0.25) {
+    out.push({
+      id: 'context-compaction',
+      severity: 'warning',
+      dimension: 'efficiency',
+      title: 'Loading this skill triggers context compaction',
+      evidence:
+        String(stats.compactions) +
+        ' compaction(s) across ' +
+        String(stats.compactionWindows) +
+        ' window(s), ' +
+        String(stats.closed) +
+        ' closed load(s)',
+      fix: 'Move long reference material to references/ and keep the loaded body small; a skill that forces compaction costs the whole window working memory.',
     })
   }
 

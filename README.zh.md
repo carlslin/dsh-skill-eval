@@ -1,8 +1,8 @@
 # dsh-skill-eval（技能评测）
 
-[![npm](https://img.shields.io/badge/npm-v1.23.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.24.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.23.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.24.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 技能没有成绩单。这个插件替它记一份。
 
@@ -47,12 +47,17 @@ _文件_，而上面这些信号只有在 harness 真跑起来时才存在。
 
 ## 分数由什么组成
 
-| 维度     | 权重 | 信号                                 |
-| -------- | ---- | ------------------------------------ |
-| 静态质量 | 0.30 | 描述、触发线索、渐进披露、体量、示例 |
-| 可靠性   | 0.25 | 加载成功率 × 加载后工具错误率        |
-| 有效性   | 0.30 | 用户纠正、加载后被忽略、兄弟技能碰撞 |
-| 效率     | 0.15 | 每次运行的调用数、加载延迟           |
+| 维度     | 权重 | 信号                                                         |
+| -------- | ---- | ------------------------------------------------------------ |
+| 静态质量 | 0.30 | 描述、触发线索、渐进披露、体量、示例                         |
+| 可靠性   | 0.25 | 加载成功率 × 加载后工具错误率                                |
+| 有效性   | 0.30 | 显式评分、用户纠正、加载后被忽略、兄弟技能碰撞、产出的交付物 |
+| 效率     | 0.15 | 每次运行的调用数、加载延迟、上下文压缩                       |
+
+证据来自 DSH 的耐久事件流：`feedback/message-put`（显式评分）、`deliverables/presented`、
+`workspace/changes`、`job/settled`、`team/task`、`approval/asked|decided`、
+`compaction/start`、`model/selection` 与 `agent-preset/selected`。静态检查评的是
+模型目录里渲染后的描述（归一化并截断），不是原始 frontmatter。
 
 等级：`A ≥ 90`、`B ≥ 80`、`C ≥ 70`、`D ≥ 60`、`F < 60`。
 
@@ -194,6 +199,9 @@ npm test
 ## 已知盲区
 
 - 记录 `skill` 工具调用与用户输入的 `/skill-name`；harness 自动激活、既不调工具也不输命令的技能看不到。
-- 有效性推断自下一条用户消息，不是任务结论。
+- 有显式评分时以评分为准；没有评分才回退到下一条用户消息。产出证据只认交付物、文件改动、后台任务完成与团队任务完成。
+- 子代理/团队窗口带 `agentKind`/`agentName` 记录，但仍合并进同一个技能分数。
+- 静态检查用渲染后的目录描述；未捕获到真实目录消息时按宿主的默认上限（500 字符）重建。
 - 中文界面下建议的 evidence 仍保留测量用的英文 id/数字。
 - 遥测只追加；上限 8 MB，写满后保留最新一半（`edit` 审计账本优先保留）。
+- 用户纠正文本与显式反馈备注默认保存；设 `redactCorrections: true` 后只存 `[redacted N 字符]`。
