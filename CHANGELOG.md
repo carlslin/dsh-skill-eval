@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.25.1 — slash commands keep the skill window open
+
+- A slash command (`/compact`, `/skill-eval`, `/model`, …) is not a user
+  follow-up on the skill's work, so it no longer closes the open skill window.
+  This lets compaction triggered by `/compact` be attributed to the loaded
+  skill instead of ending the window first.
+- Tests: **344 passing**; adds the command-vs-follow-up regression test.
+
 ## 1.25.0 — durable feedback, edit trends and export
 
 - **Feedback survives a host restart.** A rating for a message whose window is

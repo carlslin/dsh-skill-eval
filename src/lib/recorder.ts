@@ -914,10 +914,14 @@ export function createRecorder(
           for (const w of expired) persist(w, 'stale')
           if (state.windows.length === 0) return
         }
-        const text = messageText(payload.message)
+        const text = messageText(payload.message).trim()
         if (text.length > 0 && isCorrection(text)) {
           for (const w of state.windows) w.corrections.push(text)
         }
+        // A slash command is not user follow-up on the skill's work: /compact,
+        // /skill-eval, /model and friends must not close the open window (or
+        // the compaction they trigger cannot be attributed to the skill).
+        if (/^\/[a-z][\w-]*(?:\s|$)/i.test(text)) return
         closeWindows(state, 'user-turn')
       } catch {
         // ignore

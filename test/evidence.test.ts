@@ -377,6 +377,50 @@ test('editHistoryOf compares each edit with the segment before it', () => {
   assert.equal(points[1].delta, -20)
 })
 
+test('slash commands do not close the open skill window', async () => {
+  const { dir, store } = await tempStore()
+  const ctx = fakeCtx()
+  const recorder = createRecorder(
+    ctx,
+    { windowToolCalls: 12, windowTtlMs: 60_000 },
+    {
+      store,
+      resolveSkill: async () => ({
+        summary: { name: 'pdf-tools', description: 'Use when converting PDFs.' },
+        definition: { content: '# PDF tools' },
+      }),
+    },
+  )
+  try {
+    loadSkill(ctx, 'pdf-tools', 'cmd-1')
+    sessionEvent(ctx, 'assistant/message', {
+      message: { id: 'msg-cmd', source: { provider: 'deepseek', model: 'v4' } },
+      usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0 },
+    })
+    ctx.emit('agent/turn-stopping', { agent })
+    ctx.emit('agent/inbox/claimed', {
+      agent,
+      message: { content: [{ type: 'text', text: '/compact' }] },
+    })
+    let records = await settle(store)
+    let latest = records.filter((record) => record.t === 'window').at(-1) as Fake | undefined
+    assert.ok(latest)
+    assert.equal(latest.closeReason, 'turn-end')
+
+    ctx.emit('agent/inbox/claimed', {
+      agent,
+      message: { content: [{ type: 'text', text: 'now a real follow-up' }] },
+    })
+    records = await settle(store)
+    latest = records.filter((record) => record.t === 'window').at(-1) as Fake | undefined
+    assert.ok(latest)
+    assert.equal(latest.closeReason, 'user-turn')
+  } finally {
+    await recorder.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('message feedback submitted after the window closed still updates it', async () => {
   const { dir, store } = await tempStore()
   const ctx = fakeCtx()
