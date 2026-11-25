@@ -1,8 +1,8 @@
 # dsh-skill-eval（技能评测）
 
-[![npm](https://img.shields.io/badge/npm-v1.24.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.25.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.24.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.25.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 技能没有成绩单。这个插件替它记一份。
 
@@ -31,6 +31,7 @@ _文件_，而上面这些信号只有在 harness 真跑起来时才存在。
   （`window.__SEV_ENABLE_POPUP__ = true`）。
 - `skill_eval_report` 工具 —— agent 直接读自己的遥测，不再靠猜
 - `/skill-eval [技能]` 命令 —— 在输入框里看同一份报告
+- `dsh-skill-eval-export [--format csv|json] [--out 文件]` —— 导出报告；不加 --out 输出到 stdout
 - `/skill-eval/board/<版本>` —— 看板：等级、维度条、趋势、证据标签（反馈/产出/审批/压缩/模型）以及最近一次修改的改前/改后分数
 - 追加式 JSONL 遥测：`$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
   （上限 8 MB，写满后丢弃最旧的一半，长期运行也不会无限增长）

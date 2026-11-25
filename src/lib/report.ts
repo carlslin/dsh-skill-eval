@@ -105,6 +105,72 @@ export interface EditImpact {
   direction: 'improved' | 'regressed' | 'flat' | 'insufficient'
 }
 
+/** One reviewed edit's effect against the segment immediately before it. */
+export interface EditPoint {
+  at: number
+  dimension: string | null
+  verdict: string | null
+  hypothesis: string | null
+  before: { score: number | null; loads: number }
+  after: { score: number | null; loads: number }
+  delta: number | null
+}
+
+/**
+ * Segment a skill's samples between consecutive edits and report each edit's
+ * effect against the segment right before it. This shows whether successive
+ * changes are still moving the score, instead of only comparing the latest
+ * edit with the entire history.
+ */
+export function editHistoryOf({
+  edits,
+  samples,
+  score,
+}: {
+  edits: readonly { at?: unknown; dimension?: unknown; verdict?: unknown; hypothesis?: unknown }[] | null | undefined
+  samples: readonly FoldedSample[]
+  score: (subset: FoldedSample[]) => number | null
+}): EditPoint[] {
+  const ordered = (edits ?? [])
+    .filter((edit) => edit && Number.isFinite(Number(edit.at)))
+    .map((edit) => ({ ...edit, at: Number(edit.at) }))
+    .sort((a, b) => a.at - b.at)
+  const seen = new Set<number>()
+  const unique: typeof ordered = []
+  for (const edit of ordered) {
+    if (seen.has(edit.at)) continue
+    seen.add(edit.at)
+    unique.push(edit)
+  }
+  return unique.map((edit, index) => {
+    const lower = index === 0 ? -Infinity : unique[index - 1].at
+    const upper = unique[index + 1]?.at ?? Infinity
+    const beforeSamples = samples.filter((sample) => {
+      const at = Number(sample.at)
+      return Number.isFinite(at) && at >= lower && at < edit.at
+    })
+    const afterSamples = samples.filter((sample) => {
+      const at = Number(sample.at)
+      return Number.isFinite(at) && at >= edit.at && at < upper
+    })
+    const beforeScore = beforeSamples.length > 0 ? score(beforeSamples) : null
+    const afterScore = afterSamples.length > 0 ? score(afterSamples) : null
+    const delta =
+      typeof beforeScore === 'number' && typeof afterScore === 'number'
+        ? Math.round((afterScore - beforeScore) * 10) / 10
+        : null
+    return {
+      at: edit.at,
+      dimension: typeof edit.dimension === 'string' ? edit.dimension : null,
+      verdict: typeof edit.verdict === 'string' ? edit.verdict : null,
+      hypothesis: typeof edit.hypothesis === 'string' ? edit.hypothesis.slice(0, 200) : null,
+      before: { score: beforeScore, loads: beforeSamples.length },
+      after: { score: afterScore, loads: afterSamples.length },
+      delta,
+    }
+  })
+}
+
 /**
  * Split a skill's samples around its latest reviewed edit and compare the
  * before/after total. This is the only honest way to answer "did the edit
@@ -494,20 +560,22 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         .filter((point) => point !== null)
       const windows = group.samples.map((sample) => sample.window).filter((window) => window !== null)
       const skillEdits = editsChronological.filter((record) => record.skill === group.skill)
+      const scoreSubset = (subset: FoldedSample[]): number | null => {
+        const total = scoreSamples(subset).total
+        return typeof total === 'number' ? total : null
+      }
       const editImpact = editImpactOf({
         edits: skillEdits,
         samples: group.samples,
         minimum: minSamples,
-        score: (subset) => {
-          const total = scoreSamples(subset).total
-          return typeof total === 'number' ? total : null
-        },
+        score: scoreSubset,
         ci: (subset) =>
           bootstrapCI(subset, (draw) => scoreSamples(draw).total, {
             resamples: config.ciResamples ?? 200,
             seed: hashSeed(group.skill + ':edit'),
           }),
       })
+      const editHistory = editHistoryOf({ edits: skillEdits, samples: group.samples, score: scoreSubset })
       const advice = buildAdvice({
         stats,
         static: sp,
@@ -539,6 +607,7 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         score,
         trend,
         editImpact,
+        editHistory,
         advice,
         topAdvice: topAdvice(advice, Math.min(config.maxAdvice ?? 3, adviceBudget)),
       })

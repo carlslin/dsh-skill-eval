@@ -1,8 +1,8 @@
 # dsh-skill-eval
 
-[![npm](https://img.shields.io/badge/npm-v1.24.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.25.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.24.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.25.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 A skill has no report card. This plugin keeps one.
 
@@ -155,6 +155,9 @@ settings live under **Settings → Plugins → `dsh-skill-eval`**.
 - **Agent**: ask "how did `pdf-tools` perform?" — the agent calls
   `skill_eval_report`; before editing a skill it is told to call
   `skill_eval_review` first.
+- **Export**: `dsh-skill-eval-export [--format csv|json] [--out file]` turns
+  the same report into a spreadsheet-friendly CSV or JSON. Without `--out` it
+  writes to stdout.
 - **Slash commands**: `/skill-eval` (summary), `/skill-eval <skill>`,
   `loop [all]`, `validity`, `history`, `impact`, `mcp`, `runs`, `turns`, `dev`,
   `config`, `accept`.

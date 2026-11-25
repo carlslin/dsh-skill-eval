@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.25.0 — durable feedback, edit trends and export
+
+- **Feedback survives a host restart.** A rating for a message whose window is
+  no longer in memory is recovered from the persisted window store, recomputed
+  and appended as the latest window generation. This covers the normal case
+  where the host is restarted between reading a message and rating it.
+- **Edit trend.** Every skill now carries one point per reviewed edit, comparing
+  the score in the segment after that edit with the segment immediately before
+  it. Markdown reports render the trend when there is more than one edit.
+- **Export CLI.** `dsh-skill-eval-export` writes the full report as JSON or a
+  stable, spreadsheet-friendly CSV (`--format csv|json`, `--out`, `--data-dir`).
+- Tests: **343 passing**; the export rows are covered by unit tests.
+
 ## 1.24.1 — late message feedback
 
 - **Fix: feedback submitted after the window closed was dropped.** Like/Dislike

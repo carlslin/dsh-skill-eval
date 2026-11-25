@@ -137,6 +137,22 @@ the direction is `insufficient` and the advice asks for more runs. A significant
 drop raises `edit-regression`, a significant gain is confirmed as
 `edit-improved`, and a one-sided sample raises `edit-unmeasured`.
 
+A late message rating can arrive after the window has closed, or even after the
+host restarted. Closed windows are kept in a bounded in-memory index; when no
+live or retired window knows the message, the recorder reads the persisted
+window store, recomputes feedback from the recorded message ids and appends the
+updated window as the newest generation (the folder takes the latest record per
+`windowId`). This is why `feedback/message-put` remains durable across a restart.
+
+`editHistory` is the multi-edit version of `editImpact`: it splits samples into
+segments between consecutive edits and reports each edit's before/after score
+against the segment immediately before it. The markdown report prints an
+`edit trend` section when a skill has more than one reviewed edit.
+
+`dsh-skill-eval-export` reads the same analyzer report and writes a flat JSON
+document or a stable CSV (one row per skill). Use it for spreadsheets, CI
+artifacts or comparing two snapshots; it does not write telemetry.
+
 A failed load multiplies reliability instead of only halving it: a skill that
 cannot be loaded has zero reliability, not 40/100.
 

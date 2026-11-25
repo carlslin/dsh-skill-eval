@@ -341,6 +341,20 @@ export function renderSkillMarkdown(entry: SkillEntry): string {
     if (impact.dimension) lines.push(`- dimension: ${escapeMdCell(impact.dimension)}`)
     if (impact.hypothesis) lines.push(`- hypothesis: ${escapeMdCell(impact.hypothesis)}`)
   }
+  const history = entry.editHistory ?? []
+  if (history.length > 1) {
+    lines.push('')
+    lines.push('### edit trend')
+    lines.push('')
+    for (const point of history) {
+      const delta = point.delta === null ? '—' : (point.delta > 0 ? '+' : '') + fmt(point.delta)
+      lines.push(
+        `- ${formatTimestamp(point.at)}: ${fmt(point.before.score)} (${point.before.loads}) → ${fmt(
+          point.after.score,
+        )} (${point.after.loads}), Δ ${delta}${point.dimension ? ' · ' + escapeMdCell(point.dimension) : ''}`,
+      )
+    }
+  }
   if (entry.staticQuality) {
     lines.push('')
     lines.push(

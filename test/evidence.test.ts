@@ -7,7 +7,7 @@ import { EventStore, foldSamples } from '../src/lib/store.ts'
 import { createRecorder } from '../src/lib/recorder.ts'
 import { aggregate, scoreSkill, staticProfile } from '../src/lib/score.ts'
 import { buildAdvice } from '../src/lib/advice.ts'
-import { editImpactOf } from '../src/lib/report.ts'
+import { editHistoryOf, editImpactOf } from '../src/lib/report.ts'
 import type { WindowRecord } from '../src/lib/types.ts'
 import type { FoldedSample } from '../src/lib/store.ts'
 import type { Fn } from './helpers.ts'
@@ -349,6 +349,34 @@ test('edit impact drives confirmation, regression and unmeasured advice', () => 
   assert.ok(unmeasured.includes('edit-unmeasured'))
 })
 
+test('editHistoryOf compares each edit with the segment before it', () => {
+  const samples = [
+    samplePoint(1, 80),
+    samplePoint(2, 82),
+    samplePoint(10, 90),
+    samplePoint(11, 92),
+    samplePoint(20, 70),
+    samplePoint(21, 72),
+  ]
+  const points = editHistoryOf({
+    edits: [
+      { at: 15, dimension: 'effectiveness', verdict: 'accept', hypothesis: 'second' },
+      { at: 5, dimension: 'static', verdict: 'accept', hypothesis: 'first' },
+    ],
+    samples,
+    score: meanOf,
+  })
+  assert.equal(points.length, 2)
+  assert.equal(points[0].at, 5)
+  assert.equal(points[0].before.score, 81)
+  assert.equal(points[0].after.score, 91)
+  assert.equal(points[0].delta, 10)
+  assert.equal(points[1].at, 15)
+  assert.equal(points[1].before.score, 91)
+  assert.equal(points[1].after.score, 71)
+  assert.equal(points[1].delta, -20)
+})
+
 test('message feedback submitted after the window closed still updates it', async () => {
   const { dir, store } = await tempStore()
   const ctx = fakeCtx()
@@ -399,6 +427,58 @@ test('message feedback submitted after the window closed still updates it', asyn
     assert.equal(sample?.window?.feedback?.positive, 1)
   } finally {
     await recorder.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('message feedback still reaches a window persisted by a previous recorder', async () => {
+  const { dir, store } = await tempStore()
+  const firstCtx = fakeCtx()
+  const first = createRecorder(
+    firstCtx,
+    { windowToolCalls: 12, windowTtlMs: 60_000 },
+    {
+      store,
+      resolveSkill: async () => ({
+        summary: { name: 'pdf-tools', description: 'Use when converting PDFs.' },
+        definition: { content: '# PDF tools' },
+      }),
+    },
+  )
+  try {
+    loadSkill(firstCtx, 'pdf-tools', 'restart-1')
+    sessionEvent(firstCtx, 'assistant/message', {
+      message: { id: 'msg-restart', source: { provider: 'deepseek', model: 'v4' } },
+      usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0 },
+    })
+    firstCtx.emit('agent/turn-stopping', { agent })
+    firstCtx.emit('agent/inbox/claimed', {
+      agent,
+      message: { content: [{ type: 'text', text: 'next question' }] },
+    })
+    await settle(store)
+    await first.dispose()
+
+    // A new recorder starts with no in-memory windows at all, like a host restart.
+    const secondCtx = fakeCtx()
+    const second = createRecorder(secondCtx, { windowToolCalls: 12, windowTtlMs: 60_000 }, { store })
+    try {
+      sessionEvent(secondCtx, 'feedback/message-put', {
+        sessionId: 'session-1',
+        item: { messageId: 'msg-restart', rating: 'negative', category: 'wrong-output' },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const records = await settle(store)
+      const latest = records.filter((record) => record.t === 'window' && record.skill === 'pdf-tools').at(-1) as
+        Fake | undefined
+      assert.ok(latest)
+      assert.equal(latest.feedback?.negative, 1)
+      assert.equal(latest.feedback?.categories['wrong-output'], 1)
+      assert.equal(latest.closeReason, 'user-turn')
+    } finally {
+      await second.dispose()
+    }
+  } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })

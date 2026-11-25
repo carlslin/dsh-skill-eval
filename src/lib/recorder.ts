@@ -220,7 +220,7 @@ export interface RecorderConfig {
 export function createRecorder(
   ctx: Host,
   config: RecorderConfig,
-  { store, resolveSkill }: { store: Pick<EventStore, 'append' | 'queue'>; resolveSkill?: ResolveSkill },
+  { store, resolveSkill }: { store: Pick<EventStore, 'append' | 'queue' | 'readAll'>; resolveSkill?: ResolveSkill },
 ) {
   const starts = new Map<unknown, number>() // callId -> ms timestamp
   const steps = new Map<string, number>() // sessionId -> current loop step number
@@ -456,17 +456,49 @@ export function createRecorder(
     return config.redactCorrections === true ? `[redacted ${text.length} chars]` : text.slice(0, 300)
   }
 
-  function refreshFeedback(w: LiveWindow): void {
+  function feedbackFor(sessionId: string, messageIds: readonly string[]): WindowFeedback {
     const feedback = emptyFeedback()
-    for (const id of w.messageIds) {
-      const item = feedbackByMessage.get(`${w.sessionId}|${id}`)
+    for (const id of messageIds) {
+      const item = feedbackByMessage.get(`${sessionId}|${id}`)
       if (!item) continue
       if (item.rating === 'positive') feedback.positive += 1
       else if (item.rating === 'negative') feedback.negative += 1
       if (item.category) feedback.categories[item.category] = (feedback.categories[item.category] ?? 0) + 1
       if (item.note && feedback.notes.length < 4) feedback.notes.push(noteText(item.note))
     }
-    w.feedback = feedback
+    return feedback
+  }
+
+  function refreshFeedback(w: LiveWindow): void {
+    w.feedback = feedbackFor(w.sessionId, w.messageIds)
+  }
+
+  /**
+   * A rating can arrive after a host restart, when no live or retired window
+   * knows the message. Recover the persisted window from the store, recompute
+   * its feedback and append the updated record (the folder takes the latest
+   * record per windowId). This keeps ratings durable without an unbounded
+   * in-memory index.
+   */
+  async function repairPersistedFeedback(sessionId: string, messageId: string): Promise<void> {
+    try {
+      const records = await store.readAll()
+      let target: Record<string, unknown> | null = null
+      for (const record of records) {
+        if (record.t !== 'window' || record.sessionId !== sessionId) continue
+        const ids = Array.isArray(record.messageIds) ? record.messageIds : []
+        if (!ids.includes(messageId)) continue
+        target = record as Record<string, unknown>
+      }
+      if (!target) return
+      const ids = (Array.isArray(target.messageIds) ? target.messageIds : []).filter(
+        (id): id is string => typeof id === 'string',
+      )
+      const feedback = feedbackFor(sessionId, ids)
+      await store.append({ ...target, feedback: hasFeedback(feedback) ? feedback : undefined })
+    } catch {
+      // telemetry must never break the host
+    }
   }
 
   function failureStatus(data: Host): string {
@@ -1011,24 +1043,38 @@ export function createRecorder(
               category: typeof item.category === 'string' ? item.category.slice(0, 40) : null,
               note: typeof item.note === 'string' && item.note.trim().length > 0 ? item.note.slice(0, 300) : null,
             })
-            for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            let known = false
+            for (const w of windows) {
+              if (!w.messageIds.includes(messageId)) continue
+              refreshFeedback(w)
+              known = true
+            }
             for (const entry of retired.values()) {
               if (!entry.window.messageIds.includes(messageId)) continue
               refreshFeedback(entry.window)
               persist(entry.window, entry.reason)
+              known = true
             }
+            if (!known) void repairPersistedFeedback(sessionId, messageId)
             break
           }
           case 'feedback/message-delete': {
             const messageId = typeof data.messageId === 'string' ? data.messageId : null
             if (!messageId) break
             feedbackByMessage.delete(`${sessionId}|${messageId}`)
-            for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            let known = false
+            for (const w of windows) {
+              if (!w.messageIds.includes(messageId)) continue
+              refreshFeedback(w)
+              known = true
+            }
             for (const entry of retired.values()) {
               if (!entry.window.messageIds.includes(messageId)) continue
               refreshFeedback(entry.window)
               persist(entry.window, entry.reason)
+              known = true
             }
+            if (!known) void repairPersistedFeedback(sessionId, messageId)
             break
           }
           case 'feedback/record': {
