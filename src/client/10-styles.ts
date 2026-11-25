@@ -32,6 +32,8 @@ const STYLES = [
   '.sev-dim-track i{display:block;height:100%;border-radius:4px;min-width:2px}',
   '.sev-dim b{font-size:11px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary, #71717a)}',
   '.sev-meta{font-size:11px;color:var(--dsw-alias-label-secondary, #71717a);font-variant-numeric:tabular-nums}',
+  '.sev-evidence{display:flex;flex-wrap:wrap;gap:4px;margin:7px 0 2px}',
+  '.sev-chip{font-size:10px;line-height:1.5;padding:1px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2, #f4f4f5);color:var(--dsw-alias-label-secondary, #52525b);white-space:nowrap}',
   '.sev-advice{list-style:none;margin:9px 0 0;padding:0;display:grid;gap:7px}',
   '.sev-advice li{border-left:3px solid var(--dsw-alias-border-l2, #d4d4d8);padding-left:9px}',
   '.sev-advice b{display:block;font-size:12px;font-weight:600}',

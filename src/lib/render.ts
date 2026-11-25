@@ -2,7 +2,8 @@
 
 import { localizeReport } from './advice.ts'
 import { escapeHtml as esc, escapeMdCell, formatTimestamp } from './html.ts'
-import type { Report, SkillEntry } from './report.ts'
+import type { EditImpact, Report, SkillEntry } from './report.ts'
+import type { Stats } from './score.ts'
 import type { buildValidity } from './validity.ts'
 import type { Advice } from './types.ts'
 
@@ -184,7 +185,25 @@ export function renderSummaryMarkdown(report: Report): string {
     lines.push('')
     lines.push(`> ${report.ranking.note}`)
   }
-  lines.push('')
+  const impacts = report.skills.filter((s) => s.editImpact)
+  if (impacts.length > 0) {
+    lines.push('')
+    lines.push('### edit impact (latest reviewed edit)')
+    lines.push('')
+    for (const s of impacts) {
+      const impact = s.editImpact
+      if (!impact) continue
+      const delta = impact.delta === null ? '—' : (impact.delta > 0 ? '+' : '') + fmt(impact.delta)
+      lines.push(
+        `- \`${escapeMdCell(s.skill)}\`: ${fmt(impact.before.score)} (${impact.before.loads} load(s)) → ${fmt(
+          impact.after.score,
+        )} (${impact.after.loads} load(s)), Δ ${delta} — ${
+          impact.significant ? impact.direction : 'not significant yet'
+        }`,
+      )
+    }
+    lines.push('')
+  }
   if ((report.mcpServers ?? []).length > 0) {
     lines.push('### MCP servers')
     lines.push('')
@@ -304,6 +323,24 @@ export function renderSkillMarkdown(entry: SkillEntry): string {
   }
   const presetKeys = Object.keys(entry.stats.presets ?? {})
   if (presetKeys.length > 0) lines.push(`- presets observed: ${presetKeys.slice(0, 3).join(', ')}`)
+  const impact = entry.editImpact
+  if (impact) {
+    lines.push('')
+    lines.push('### edit impact (latest reviewed edit)')
+    lines.push('')
+    lines.push(
+      `- before: ${fmt(impact.before.score)} over ${impact.before.loads} load(s) → after: ${fmt(impact.after.score)} over ${impact.after.loads} load(s)`,
+    )
+    if (impact.delta !== null) {
+      lines.push(
+        `- delta: ${impact.delta > 0 ? '+' : ''}${fmt(impact.delta)} — ${
+          impact.significant ? impact.direction : 'not significant yet'
+        }`,
+      )
+    }
+    if (impact.dimension) lines.push(`- dimension: ${escapeMdCell(impact.dimension)}`)
+    if (impact.hypothesis) lines.push(`- hypothesis: ${escapeMdCell(impact.hypothesis)}`)
+  }
   if (entry.staticQuality) {
     lines.push('')
     lines.push(
@@ -388,6 +425,7 @@ interface BoardText {
   noSkills: string
   dims: Record<string, string>
   meta: (s: SkillEntry) => string
+  evidence: (s: SkillEntry) => string
   noIssues: string
   nextTitle: string
   priority: string
@@ -407,6 +445,68 @@ interface BoardText {
   toggle: (other: string, label: string) => string
 }
 
+/** One compact evidence line for the board card. */
+function boardEvidence(stats: Stats, impact: EditImpact | null | undefined, lang: 'en' | 'zh' = 'en'): string {
+  const zh = lang === 'zh'
+  const parts: string[] = []
+  if ((stats.feedbackTotal ?? 0) > 0) {
+    parts.push(
+      (zh ? '反馈 ' : 'feedback ') +
+        '+' +
+        String(stats.feedback?.positive ?? 0) +
+        '/-' +
+        String(stats.feedback?.negative ?? 0),
+    )
+  }
+  const o = stats.outcomes
+  const produced =
+    (o?.deliverables ?? 0) +
+    (o?.workspaceChanges ?? 0) +
+    (o?.jobsSettled ?? 0) +
+    (o?.tasksCompleted ?? 0) +
+    (o?.workflowRuns ?? 0)
+  if (produced > 0) parts.push((zh ? '产出 ' : 'outcomes ') + String(produced))
+  if ((stats.approvals?.asked ?? 0) > 0 || (stats.approvals?.rejected ?? 0) > 0) {
+    parts.push(
+      (zh ? '审批 ' : 'approvals ') +
+        String(stats.approvals?.rejected ?? 0) +
+        '/' +
+        String(stats.approvals?.decided ?? 0) +
+        (zh ? ' 被拒' : ' denied'),
+    )
+  }
+  if ((stats.compactions ?? 0) > 0) parts.push((zh ? '压缩 ' : 'compactions ') + String(stats.compactions))
+  const modelKeys = Object.keys(stats.models ?? {})
+  if (modelKeys.length > 0) parts.push((zh ? '模型 ' : 'model ') + modelKeys[0])
+  if (impact) {
+    const delta = impact.delta === null ? '—' : (impact.delta > 0 ? '+' : '') + fmt(impact.delta)
+    const verdict = !impact.significant
+      ? zh
+        ? '（未显著）'
+        : ' (not significant)'
+      : impact.direction === 'improved'
+        ? zh
+          ? '（提升）'
+          : ' (improved)'
+        : impact.direction === 'regressed'
+          ? zh
+            ? '（回退）'
+            : ' (regressed)'
+          : ''
+    parts.push(
+      (zh ? '改动 ' : 'edit ') +
+        fmt(impact.before.score) +
+        '→' +
+        fmt(impact.after.score) +
+        ' (' +
+        delta +
+        ')' +
+        verdict,
+    )
+  }
+  return parts.join(' · ')
+}
+
 const BOARD: Record<'en' | 'zh', BoardText> = {
   en: {
     lang: 'en',
@@ -421,6 +521,7 @@ const BOARD: Record<'en' | 'zh', BoardText> = {
       `${s.stats.loads} load(s) · corr ${pct(s.stats.correctionRate)} · abandon ${pct(s.stats.abandonRate)} · err ${pct(
         s.stats.errRate,
       )} · ${fmt(s.stats.p50LoadMs, 0)}ms`,
+    evidence: (s) => boardEvidence(s.stats, s.editImpact),
     noIssues: 'no issues from recorded evidence',
     nextTitle: 'Next steps (ranked by expected gain / effort)',
     priority: 'priority',
@@ -462,6 +563,7 @@ const BOARD: Record<'en' | 'zh', BoardText> = {
       `${s.stats.loads} 次加载 · 纠正 ${pct(s.stats.correctionRate)} · 忽略 ${pct(s.stats.abandonRate)} · 报错 ${pct(
         s.stats.errRate,
       )} · ${fmt(s.stats.p50LoadMs, 0)}ms`,
+    evidence: (s) => boardEvidence(s.stats, s.editImpact, 'zh'),
     noIssues: '按现有证据没有需要修的问题',
     nextTitle: '下一步（按预期收益 / 成本排序）',
     priority: '优先级',
@@ -520,6 +622,7 @@ export function renderHtml(input: Report, options: { lang?: string; base?: strin
   </header>
   <div class="dims">${cells}</div>
   <div class="meta">${esc(t.meta(s))}</div>
+  ${t.evidence(s) ? `<div class="meta">${esc(t.evidence(s))}</div>` : ''}
   ${advice ? `<ul class="advice">${advice}</ul>` : `<div class="meta">${esc(t.noIssues)}</div>`}
 </article>`
     })

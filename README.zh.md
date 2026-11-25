@@ -31,7 +31,7 @@ _文件_，而上面这些信号只有在 harness 真跑起来时才存在。
   （`window.__SEV_ENABLE_POPUP__ = true`）。
 - `skill_eval_report` 工具 —— agent 直接读自己的遥测，不再靠猜
 - `/skill-eval [技能]` 命令 —— 在输入框里看同一份报告
-- `/skill-eval/board/<版本>` —— 看板：等级、维度条、趋势，以及每个技能接下来该改什么
+- `/skill-eval/board/<版本>` —— 看板：等级、维度条、趋势、证据标签（反馈/产出/审批/压缩/模型）以及最近一次修改的改前/改后分数
 - 追加式 JSONL 遥测：`$DSH_HOME/skill-eval/$DSH_PROFILE/events.jsonl`
   （上限 8 MB，写满后丢弃最旧的一半，长期运行也不会无限增长）
 - **技能卡「复制问题」**：把该卡当前的评分、维度、证据和全部问题复制成可直接粘贴的

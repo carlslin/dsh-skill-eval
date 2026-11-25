@@ -7,7 +7,9 @@ import { EventStore, foldSamples } from '../src/lib/store.ts'
 import { createRecorder } from '../src/lib/recorder.ts'
 import { aggregate, scoreSkill, staticProfile } from '../src/lib/score.ts'
 import { buildAdvice } from '../src/lib/advice.ts'
+import { editImpactOf } from '../src/lib/report.ts'
 import type { WindowRecord } from '../src/lib/types.ts'
+import type { FoldedSample } from '../src/lib/store.ts'
 import type { Fn } from './helpers.ts'
 import type { Fake } from './helpers.ts'
 
@@ -260,4 +262,89 @@ test('catalog completeness from resolveSkill reaches the static record', async (
     await recorder.dispose()
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+function samplePoint(at: number, value: number): FoldedSample {
+  return { at, ok: true, turn: null, via: 'tool', window: { value } } as unknown as FoldedSample
+}
+
+function meanOf(subset: FoldedSample[]): number | null {
+  if (subset.length === 0) return null
+  return (
+    subset.reduce((sum, sample) => sum + Number((sample.window as unknown as { value: number }).value), 0) /
+    subset.length
+  )
+}
+
+function fixedCi(subset: FoldedSample[]) {
+  const mean = meanOf(subset)
+  if (mean === null) return null
+  return { level: 0.95, mean, low: mean - 2, high: mean + 2, resamples: 50, windows: subset.length }
+}
+
+test('editImpactOf splits before/after around the latest reviewed edit', () => {
+  const samples = [samplePoint(1, 80), samplePoint(2, 82), samplePoint(10, 90), samplePoint(11, 92)]
+  const impact = editImpactOf({
+    edits: [
+      { at: 5, dimension: 'static', verdict: 'accept', hypothesis: 'sharpen triggers' },
+      { at: 4, dimension: 'effectiveness', verdict: 'reject' },
+    ],
+    samples,
+    minimum: 2,
+    score: meanOf,
+    ci: fixedCi,
+  })
+  assert.ok(impact)
+  assert.equal(impact.before.loads, 2)
+  assert.equal(impact.after.loads, 2)
+  assert.equal(impact.before.score, 81)
+  assert.equal(impact.after.score, 91)
+  assert.equal(impact.delta, 10)
+  assert.equal(impact.dimension, 'static')
+  assert.equal(impact.significant, true)
+  assert.equal(impact.direction, 'improved')
+
+  const insufficient = editImpactOf({
+    edits: [{ at: 5 }],
+    samples: [samplePoint(1, 80), samplePoint(6, 90)],
+    minimum: 2,
+    score: meanOf,
+    ci: fixedCi,
+  })
+  assert.ok(insufficient)
+  assert.equal(insufficient.significant, false)
+  assert.equal(insufficient.direction, 'insufficient')
+})
+
+test('edit impact drives confirmation, regression and unmeasured advice', () => {
+  const stats = aggregate([])
+  const base = {
+    before: { score: 80, loads: 4 },
+    after: { score: 90, loads: 4 },
+    delta: 10,
+    significant: true,
+    direction: 'improved' as const,
+    dimension: 'static',
+    hypothesis: 'sharpen triggers',
+  }
+  const improved = buildAdvice({ stats, minSamples: 2, editImpact: base }).map((item) => item.id)
+  assert.ok(improved.includes('edit-improved'))
+  const regressed = buildAdvice({
+    stats,
+    minSamples: 2,
+    editImpact: { ...base, after: { score: 70, loads: 4 }, delta: -10, direction: 'regressed' as const },
+  }).map((item) => item.id)
+  assert.ok(regressed.includes('edit-regression'))
+  const unmeasured = buildAdvice({
+    stats,
+    minSamples: 3,
+    editImpact: {
+      ...base,
+      after: { score: 90, loads: 1 },
+      delta: null,
+      significant: false,
+      direction: 'insufficient' as const,
+    },
+  }).map((item) => item.id)
+  assert.ok(unmeasured.includes('edit-unmeasured'))
 })

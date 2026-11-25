@@ -25,9 +25,18 @@
   model actually sees; the invisible `whenToUse` field is no longer scored, a
   new `catalog-truncated` check catches cues cut at the cap, and an incomplete
   discovery (`snapshot().complete === false`) is surfaced as advice.
+- **Edit impact baseline.** The latest screened edit splits this skill's
+  windows into before/after; the report publishes both scores, the delta and
+  whether their 95% intervals separate, and the board shows it. Advice confirms
+  a real improvement, flags a significant regression, or asks for re-measurement
+  when either side has too few loads.
+- **Board display.** The HTML board and the sidebar skill cards now show compact
+  evidence chips: explicit feedback, produced outcomes, rejected approvals,
+  compactions, the observed model and the latest edit impact. Markdown reports
+  gained the same evidence lines plus an edit-impact section.
 - **New advice rules** for negative feedback, rejected approvals, context
   compaction, catalog truncation and incomplete discovery (with Chinese copy).
-- Tests: **331 passing** (`npm test`).
+- Tests: **334 passing** (`npm test`).
 
 ## 1.23.1 — docs that speak plainly
 

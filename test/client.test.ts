@@ -208,6 +208,22 @@ const REPORT = {
         siblingRate: 0,
         avgCalls: 4,
         p50LoadMs: 940,
+        feedbackTotal: 2,
+        feedback: { positive: 1, negative: 1, categories: { 'wrong-output': 1 }, notes: [] },
+        outcomes: {
+          deliverables: 1,
+          workspaceChanges: 1,
+          jobsSettled: 0,
+          jobsFailed: 0,
+          tasksCompleted: 0,
+          tasksFailed: 0,
+          workflowRuns: 0,
+        },
+        approvals: { asked: 1, decided: 1, rejected: 1 },
+        compactions: 1,
+        compactionWindows: 1,
+        models: { 'deepseek/v4': 2 },
+        presets: { coding: 2 },
       },
       staticQuality: { score: 77 },
       score: {
@@ -223,6 +239,17 @@ const REPORT = {
         { at: 2, total: 85 },
         { at: 3, total: 89.5 },
       ],
+      editImpact: {
+        at: 2,
+        dimension: 'static',
+        verdict: 'accept',
+        hypothesis: 'sharpen triggers',
+        before: { score: 72.5, loads: 3 },
+        after: { score: 89.5, loads: 3 },
+        delta: 17,
+        significant: true,
+        direction: 'improved',
+      },
       advice: [
         {
           id: 'user-corrections',
@@ -1523,4 +1550,43 @@ test('the turn strip stays hidden for a completed historical turn that never loa
   })
   assert.equal(host.querySelector('.sev-turn'), null)
   assert.equal(host.textContent.includes('技能评测'), false)
+})
+
+test('a skill card shows the DSH evidence chips and edit impact', async () => {
+  const { window, registrations, React } = await mountClient()
+  const Panel = registrations.find((item) => item.registration.name === 'main').Component
+  const { host, root } = createHost(window, { height: '600px' })
+  await act(async () => {
+    root.render(React.createElement(Panel))
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const card = [...host.querySelectorAll('.sev-card')].find((node) => (node.textContent || '').includes('pdf-tools'))
+  assert.ok(card)
+  const chips = [...card.querySelectorAll('.sev-chip')].map((node) => node.textContent || '')
+  assert.ok(
+    chips.some((chip) => chip.includes('反馈') && chip.includes('+1/-1')),
+    'feedback chip',
+  )
+  assert.ok(
+    chips.some((chip) => chip.includes('产出') && chip.includes('2')),
+    'outcome chip',
+  )
+  assert.ok(
+    chips.some((chip) => chip.includes('审批') && chip.includes('1/1')),
+    'approval chip',
+  )
+  assert.ok(
+    chips.some((chip) => chip.includes('压缩')),
+    'compaction chip',
+  )
+  assert.ok(
+    chips.some((chip) => chip.includes('改动') && chip.includes('72.5') && chip.includes('89.5')),
+    'edit impact chip',
+  )
+  assert.ok(
+    chips.some((chip) => chip.includes('deepseek/v4')),
+    'model chip',
+  )
 })

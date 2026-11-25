@@ -32,7 +32,8 @@ skill once, then read the strip under that turn.
   turn's calls and errors, and the fixes you can expand (no tokens, no popup).
   The old popup is opt-in (`window.__SEV_ENABLE_POPUP__ = true`).
 - **A board** at `/skill-eval/board/<version>` with grades, dimension bars and the
-  next edits for every skill.
+  next edits for every skill, plus evidence chips (feedback, outcomes, approvals,
+  compactions, model) and the latest edit's before/after score.
 - **An agent tool**, `skill_eval_report`, so the agent reads its own numbers
   instead of guessing. `/skill-eval [skill]` gives you the same report in the
   composer.

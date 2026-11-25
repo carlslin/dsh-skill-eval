@@ -63,6 +63,18 @@ const ADVICE_ZH: Record<string, { title: string; fix: string }> = {
     title: '技能目录发现不完整',
     fix: '某个 provider 读取失败，当前分数只覆盖看得见的技能。修复加载失败的技能目录/权限后重测，别把这轮当完整基线。',
   },
+  'edit-regression': {
+    title: '最近一次修改后分数显著下降',
+    fix: '回退这次修改，或缩小改动范围一次只改一个维度；用改前/改后的窗口重新验证，不要继续叠加新改动。',
+  },
+  'edit-improved': {
+    title: '最近一次修改有效',
+    fix: '保留这次修改，按同一方向继续；下一条建议应针对仍未解决的维度，而不是重复改同一个地方。',
+  },
+  'edit-unmeasured': {
+    title: '修改后还没有足够的复测样本',
+    fix: '再用这个技能跑几次（至少 minSamples 次），让改前/改后的对比有统计意义，再决定保留还是回退。',
+  },
   'dead-load': {
     title: '加载的技能经常被忽略',
     fix: '让技能首屏变成命令式清单（“第 1 步用工具 Y 做 X”）。只讲背景的正文会被读完就丢。',
@@ -278,6 +290,7 @@ export function buildAdvice({
   score,
   minSamples = 3,
   windows,
+  editImpact = null,
   gating = true,
   tokenBudgetPerLoad = 20000,
   pruneMinLoads = 6,
@@ -289,6 +302,15 @@ export function buildAdvice({
   score?: { total?: number | null; ci?: { low: number | null; high: number } | null; [field: string]: unknown } | null
   minSamples?: number
   windows?: WindowRecord[] | null
+  editImpact?: {
+    before: { score: number | null; loads: number }
+    after: { score: number | null; loads: number }
+    delta: number | null
+    significant: boolean
+    direction: 'improved' | 'regressed' | 'flat' | 'insufficient'
+    dimension: string | null
+    hypothesis: string | null
+  } | null
   gating?: boolean
   tokenBudgetPerLoad?: number
   pruneMinLoads?: number
@@ -649,6 +671,48 @@ export function buildAdvice({
         ' closed load(s)',
       fix: 'Move long reference material to references/ and keep the loaded body small; a skill that forces compaction costs the whole window working memory.',
     })
+  }
+
+  if (editImpact) {
+    const before = editImpact.before
+    const after = editImpact.after
+    const delta = editImpact.delta
+    const scope =
+      String(before.loads) +
+      ' load(s) before → ' +
+      String(after.loads) +
+      ' after' +
+      (editImpact.dimension ? ', dimension ' + editImpact.dimension : '')
+    if (editImpact.significant && editImpact.direction === 'regressed') {
+      out.push({
+        id: 'edit-regression',
+        severity: 'warning',
+        dimension: 'effectiveness',
+        title: 'The latest edit made the score significantly worse',
+        evidence:
+          'score ' + String(before.score) + ' → ' + String(after.score) + ' (Δ ' + String(delta) + '), ' + scope,
+        fix: 'Revert or narrow this edit to one dimension, then re-measure before stacking another change.',
+      })
+    } else if (editImpact.significant && editImpact.direction === 'improved') {
+      out.push({
+        id: 'edit-improved',
+        severity: 'info',
+        dimension: 'effectiveness',
+        title: 'The latest edit measurably helped',
+        evidence:
+          'score ' + String(before.score) + ' → ' + String(after.score) + ' (Δ ' + String(delta) + '), ' + scope,
+        fix: 'Keep it and continue in the same direction; target the dimensions that are still unresolved instead of re-editing this one.',
+      })
+    } else if (before.loads < minSamples || after.loads < minSamples) {
+      out.push({
+        id: 'edit-unmeasured',
+        severity: 'info',
+        dimension: 'confidence',
+        title: 'The latest edit has not been measured yet',
+        evidence: 'not enough windows on one side of the edit: ' + scope,
+        fix: 'Run this skill a few more times (at least minSamples) so the before/after comparison has statistical meaning before keeping or reverting the edit.',
+      })
+    }
   }
 
   if (stats.loads < minSamples) {

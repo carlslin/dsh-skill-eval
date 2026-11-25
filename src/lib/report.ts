@@ -91,6 +91,78 @@ export function rankingOf(entries: readonly (Rankable | null)[] | null | undefin
 /** @deprecated import via ./dimensions instead; kept for compatibility. */
 export { EDIT_DIMENSIONS }
 
+/** Measured effect of the latest reviewed edit on this skill. */
+export interface EditImpact {
+  at: number
+  dimension: string | null
+  verdict: string | null
+  hypothesis: string | null
+  before: { score: number | null; loads: number }
+  after: { score: number | null; loads: number }
+  delta: number | null
+  /** True only when both sides have enough loads and their 95% intervals separate. */
+  significant: boolean
+  direction: 'improved' | 'regressed' | 'flat' | 'insufficient'
+}
+
+/**
+ * Split a skill's samples around its latest reviewed edit and compare the
+ * before/after total. This is the only honest way to answer "did the edit
+ * help?": the edit ledger says what changed, the windows say what happened.
+ */
+export function editImpactOf({
+  edits,
+  samples,
+  minimum,
+  score,
+  ci,
+}: {
+  edits: readonly { at?: unknown; dimension?: unknown; verdict?: unknown; hypothesis?: unknown }[] | null | undefined
+  samples: readonly FoldedSample[]
+  minimum: number
+  score: (subset: FoldedSample[]) => number | null
+  ci: (subset: FoldedSample[]) => Interval95 | null
+}): EditImpact | null {
+  const latest = (edits ?? [])
+    .filter((edit) => edit && Number.isFinite(Number(edit.at)))
+    .sort((a, b) => Number(b.at) - Number(a.at))[0]
+  if (!latest) return null
+  const at = Number(latest.at)
+  const before = samples.filter((sample) => Number.isFinite(Number(sample.at)) && Number(sample.at) < at)
+  const after = samples.filter((sample) => Number.isFinite(Number(sample.at)) && Number(sample.at) >= at)
+  if (before.length === 0 && after.length === 0) return null
+  const beforeScore = before.length > 0 ? score(before) : null
+  const afterScore = after.length > 0 ? score(after) : null
+  const delta =
+    typeof beforeScore === 'number' && typeof afterScore === 'number'
+      ? Math.round((afterScore - beforeScore) * 10) / 10
+      : null
+  let significant = false
+  if (before.length >= minimum && after.length >= minimum) {
+    const beforeCi = ci(before)
+    const afterCi = ci(after)
+    significant = Boolean(beforeCi && afterCi && (afterCi.low > beforeCi.high || beforeCi.low > afterCi.high))
+  }
+  const direction: EditImpact['direction'] = !significant
+    ? 'insufficient'
+    : delta === null || Math.abs(delta) < 1
+      ? 'flat'
+      : delta > 0
+        ? 'improved'
+        : 'regressed'
+  return {
+    at,
+    dimension: typeof latest.dimension === 'string' ? latest.dimension : null,
+    verdict: typeof latest.verdict === 'string' ? latest.verdict : null,
+    hypothesis: typeof latest.hypothesis === 'string' ? latest.hypothesis.slice(0, 200) : null,
+    before: { score: beforeScore, loads: before.length },
+    after: { score: afterScore, loads: after.length },
+    delta,
+    significant,
+    direction,
+  }
+}
+
 /**
  * RRSI's annealed edit budget: early iterations may carry a bundle of edits,
  * later ones shrink to a single attributable change. Here "iteration" is the
@@ -421,18 +493,33 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         })
         .filter((point) => point !== null)
       const windows = group.samples.map((sample) => sample.window).filter((window) => window !== null)
+      const skillEdits = editsChronological.filter((record) => record.skill === group.skill)
+      const editImpact = editImpactOf({
+        edits: skillEdits,
+        samples: group.samples,
+        minimum: minSamples,
+        score: (subset) => {
+          const total = scoreSamples(subset).total
+          return typeof total === 'number' ? total : null
+        },
+        ci: (subset) =>
+          bootstrapCI(subset, (draw) => scoreSamples(draw).total, {
+            resamples: config.ciResamples ?? 200,
+            seed: hashSeed(group.skill + ':edit'),
+          }),
+      })
       const advice = buildAdvice({
         stats,
         static: sp,
         score,
         minSamples,
         windows,
+        editImpact,
         gating: config.adviceNoiseFloor !== false,
         tokenBudgetPerLoad: config.tokenBudgetPerLoad ?? 20000,
         pruneMinLoads: config.pruneMinLoads ?? 12,
         pruneMaxScore: config.pruneMaxScore ?? 60,
       })
-      const skillEdits = editsChronological.filter((record) => record.skill === group.skill)
       const accepted = skillEdits.filter((record) => record.verdict === 'accept').length
       const adviceBudget = annealedBudget(accepted, {
         max: config.editBudgetMax ?? 4,
@@ -451,6 +538,7 @@ export function createAnalyzer(ctx: Host, config: AnalyzerConfig) {
         staticQuality: sp,
         score,
         trend,
+        editImpact,
         advice,
         topAdvice: topAdvice(advice, Math.min(config.maxAdvice ?? 3, adviceBudget)),
       })

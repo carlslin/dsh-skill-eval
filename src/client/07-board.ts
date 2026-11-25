@@ -343,6 +343,64 @@ function DimensionBar(props: { label: string; value: number | null | undefined }
   )
 }
 
+function evidenceChips(skill: SkillData, t: Texts): Array<{ key: string; label: string; title?: string }> {
+  const stats: NonNullable<SkillData['stats']> = skill.stats || {}
+  const chips: Array<{ key: string; label: string; title?: string }> = []
+  if ((stats.feedbackTotal || 0) > 0) {
+    chips.push({
+      key: 'feedback',
+      label: t.feedback + ' +' + (stats.feedback?.positive || 0) + '/-' + (stats.feedback?.negative || 0),
+      title: 'explicit message feedback (DSH feedback/message-put)',
+    })
+  }
+  const o = stats.outcomes
+  const produced =
+    (o?.deliverables || 0) +
+    (o?.workspaceChanges || 0) +
+    (o?.jobsSettled || 0) +
+    (o?.tasksCompleted || 0) +
+    (o?.workflowRuns || 0)
+  if (produced > 0) {
+    chips.push({
+      key: 'outcomes',
+      label: t.outcomes + ' ' + produced,
+      title: 'deliverables, workspace changes, settled jobs, completed tasks, workflow runs',
+    })
+  }
+  if ((stats.approvals?.asked || 0) > 0 || (stats.approvals?.rejected || 0) > 0) {
+    chips.push({
+      key: 'approvals',
+      label: t.approvals + ' ' + (stats.approvals?.rejected || 0) + '/' + (stats.approvals?.decided || 0),
+      title: 'rejected / decided approvals inside the window',
+    })
+  }
+  if ((stats.compactions || 0) > 0) {
+    chips.push({ key: 'compactions', label: t.compactions + ' ' + stats.compactions, title: 'context compactions' })
+  }
+  const modelKeys = Object.keys(stats.models || {})
+  if (modelKeys.length > 0)
+    chips.push({ key: 'model', label: t.model + ' ' + modelKeys[0], title: 'model(s) observed' })
+  const impact = skill.editImpact
+  if (impact) {
+    const deltaValue = typeof impact.delta === 'number' ? impact.delta : null
+    const delta = deltaValue === null ? '—' : (deltaValue > 0 ? '+' : '') + fmt(deltaValue)
+    const verdict = !impact.significant
+      ? ' (not significant)'
+      : impact.direction === 'improved'
+        ? ' (improved)'
+        : impact.direction === 'regressed'
+          ? ' (regressed)'
+          : ''
+    chips.push({
+      key: 'edit',
+      label:
+        t.editImpact + ' ' + fmt(impact.before?.score) + '→' + fmt(impact.after?.score) + ' (' + delta + ')' + verdict,
+      title: impact.hypothesis || impact.dimension || 'latest reviewed edit',
+    })
+  }
+  return chips
+}
+
 const SkillCard = memo(function SkillCard(props: {
   skill: SkillData
   t: Texts
@@ -422,6 +480,16 @@ const SkillCard = memo(function SkillCard(props: {
           ? ' · ≈' + stats.tokensPerLoad.toLocaleString() + ' ' + t.tokPerLoad
           : ''),
     ),
+    (() => {
+      const chips = evidenceChips(skill, t)
+      return chips.length
+        ? h(
+            'div',
+            { className: 'sev-evidence' },
+            chips.map((chip) => h('span', { key: chip.key, className: 'sev-chip', title: chip.title }, chip.label)),
+          )
+        : null
+    })(),
     advice.length
       ? h(
           'ul',

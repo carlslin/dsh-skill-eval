@@ -126,6 +126,17 @@ efficiency    = 100 − (avgCalls > 8 ? min(40, (avgCalls−8)·6) : 0) − (avg
                      − min(20, compactionPerLoad·10)
 ```
 
+### edit impact (before/after baseline)
+
+Every screened edit (`skill_eval_review`) is an `edit` record with a timestamp.
+The analyzer splits that skill's samples into `at < edit.at` (before) and
+`at >= edit.at` (after), scores both with the current weights/thresholds, and
+reports the delta. It is marked **significant** only when each side has at least
+`minSamples` loads and their 95% bootstrap intervals do not overlap; otherwise
+the direction is `insufficient` and the advice asks for more runs. A significant
+drop raises `edit-regression`, a significant gain is confirmed as
+`edit-improved`, and a one-sided sample raises `edit-unmeasured`.
+
 A failed load multiplies reliability instead of only halving it: a skill that
 cannot be loaded has zero reliability, not 40/100.
 
