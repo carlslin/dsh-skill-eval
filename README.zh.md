@@ -165,7 +165,12 @@ registerReviewTool: true # skill_eval_review：泄漏审查 + 审计账本
 
 ```
 npm test
+npm run e2e   # 真实 headless turn，需要 DEEPSEEK_API_KEY
 ```
+
+`npm run e2e` 会把当前构建装进一次性 headless profile，写入探针技能，跑一个真实
+turn，然后校验遥测、报告 JSON、快照和看板 HTML。没有 `DEEPSEEK_API_KEY` 时打印
+**SKIP** 而不是失败；加 `--require-credential` 则变成 exit 2。
 
 `npm test` 会先编译，再对着 `src/` 跑套件（不是上一份 `lib/*.js`）。测试命令是
 `node --experimental-strip-types --test "test/**/*.test.ts"`；Node 22/24 会把裸目录当成

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **`npm run e2e` real-turn acceptance harness.** Creates a disposable headless
+  profile, installs the current build, writes a probe skill under
+  `.agents/skills`, runs one real turn, then verifies the durable telemetry
+  (skill load, settled window, message/model attribution, rendered catalog
+  description), the analyzer report, the snapshot and the board HTML. Explicit
+  feedback and outcome evidence are reported as SKIP when the turn produced
+  none. Without `DEEPSEEK_API_KEY` the run reports SKIP (exit 0) unless
+  `--require-credential` is passed. Pure checks live in `src/lib/e2e.ts` and are
+  covered by the normal test suite.
+
 ## 1.24.0 — DSH evidence pipeline
 
 - **The durable session event stream is now routed, not just token usage.** The

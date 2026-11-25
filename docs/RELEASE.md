@@ -43,6 +43,15 @@ dsh plugin --profile sevsmoke remove dsh-skill-eval
       `latest-snapshot` 显示 **SKIP**（还没加载过技能），不算失败；加载一次技能后重跑，
       这些项应变为 PASS。
 
+### 真实 turn 端到端（可选，需要 `DEEPSEEK_API_KEY`）
+
+```bash
+npm run e2e
+```
+
+会在一次性 headless profile 里跑一个真实 turn（加载探针技能），校验遥测、报告、
+快照和看板 HTML。没有 API key 时会打印 SKIP（exit 0）；发布前有凭证时建议跑一次。
+
 ## 5. GitHub Release
 
 tag 推上去了不等于发布了：`gh release list` 仍会显示上一个版本，`/releases/latest`

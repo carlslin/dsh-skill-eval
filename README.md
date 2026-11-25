@@ -222,7 +222,13 @@ npm run build:install  # pack + install into the desktop profile
 
 ```
 npm test
+npm run e2e   # one real headless turn; needs DEEPSEEK_API_KEY
 ```
+
+`npm run e2e` installs the current build into a throwaway headless profile,
+writes a probe skill, runs one real turn, then checks the durable telemetry,
+report JSON, snapshot and board HTML. Without `DEEPSEEK_API_KEY` it prints
+**SKIP** instead of failing; `--require-credential` turns that into exit 2.
 
 `npm test` compiles first, then runs the suite against `src/` (not a previous
 `lib/*.js`). The suite command is
