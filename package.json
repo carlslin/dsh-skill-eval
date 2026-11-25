@@ -1,6 +1,6 @@
 {
   "name": "dsh-skill-eval",
-  "version": "1.25.1",
+  "version": "1.26.0",
   "description": "Skill execution telemetry & effectiveness scoring for DeepSeek Harness: records every skill load, folds the follow-up window into evidence, scores each skill and hands the agent concrete optimization advice.",
   "type": "module",
   "main": "index.js",
@@ -95,7 +95,8 @@
     "dsh-skill-eval-verify": "scripts/verify-live.mjs",
     "dsh-skill-eval-doctor": "scripts/doctor.mjs",
     "dsh-skill-eval-accept": "scripts/accept.mjs",
-    "dsh-skill-eval-export": "scripts/export.mjs"
+    "dsh-skill-eval-export": "scripts/export.mjs",
+    "dsh-skill-eval-trigger": "scripts/trigger.mjs"
   },
   "author": "dsh-skill-eval contributors",
   "keywords": [

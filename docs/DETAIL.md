@@ -153,6 +153,16 @@ against the segment immediately before it. The markdown report prints an
 document or a stable CSV (one row per skill). Use it for spreadsheets, CI
 artifacts or comparing two snapshots; it does not write telemetry.
 
+`dsh-skill-eval-trigger` is a deterministic trigger judge. A cases file holds
+real prompts labeled with the expected skill (or `null`), for example
+`{ "prompt": "review my pull request", "expect": "code-review" }`. The judge
+ranks every skill's rendered catalog description with IDF-weighted Latin words
+and Chinese character bigrams, boosts `Use when …`/`触发` sentences, penalizes
+anti-trigger sentences, requires both a score threshold and a margin over the
+runner-up, then reports accuracy/precision/recall and per-case scores. It exits
+1 on any miss for CI. This is a lexical regression gate, not a semantic model;
+`expect` labels are the ground truth and must come from real usage or review.
+
 A failed load multiplies reliability instead of only halving it: a skill that
 cannot be loaded has zero reliability, not 40/100.
 

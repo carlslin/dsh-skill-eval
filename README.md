@@ -1,8 +1,8 @@
 # dsh-skill-eval
 
-[![npm](https://img.shields.io/badge/npm-v1.25.1-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
+[![npm](https://img.shields.io/badge/npm-v1.26.0-cb3837)](https://www.npmjs.com/package/dsh-skill-eval)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![release](https://img.shields.io/badge/release-v1.25.1-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
+[![release](https://img.shields.io/badge/release-v1.26.0-blue)](https://github.com/carlslin/dsh-skill-eval/releases)
 
 A skill has no report card. This plugin keeps one.
 
@@ -158,6 +158,12 @@ settings live under **Settings → Plugins → `dsh-skill-eval`**.
 - **Export**: `dsh-skill-eval-export [--format csv|json] [--out file]` turns
   the same report into a spreadsheet-friendly CSV or JSON. Without `--out` it
   writes to stdout.
+- **Trigger audit**: `dsh-skill-eval-trigger --cases cases.json` is a
+  deterministic trigger judge over labeled prompts. Cases look like
+  `{ "prompt": "…", "expect": "skill-name" }` (or `null` for "no skill");
+  it prints accuracy/precision/recall and exits non-zero on a miss, so it can
+  gate CI. It is lexical, not an LLM judge — use it to catch trigger
+  regressions, not to certify semantic intent.
 - **Slash commands**: `/skill-eval` (summary), `/skill-eval <skill>`,
   `loop [all]`, `validity`, `history`, `impact`, `mcp`, `runs`, `turns`, `dev`,
   `config`, `accept`.

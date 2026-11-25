@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.26.0 — trigger audit
+
+- **`dsh-skill-eval-trigger`**: a deterministic trigger judge. Give it a cases
+  file of real prompts with `expect: "skill-name"` or `expect: null`; it ranks
+  every skill's rendered catalog description, reports per-case scores and
+  accuracy/precision/recall, and exits non-zero on a failing case for CI.
+  Chinese prompts are tokenized as character bigrams; anti-trigger sentences
+  are penalized; confidence uses a margin over the runner-up.
+- Tests: **349 passing**, including the judge's ranking, stopwords, Chinese
+  tokenization and CLI success/failure paths.
+
 ## 1.25.1 — slash commands keep the skill window open
 
 - A slash command (`/compact`, `/skill-eval`, `/model`, …) is not a user
