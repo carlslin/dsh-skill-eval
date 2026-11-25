@@ -348,3 +348,57 @@ test('edit impact drives confirmation, regression and unmeasured advice', () => 
   }).map((item) => item.id)
   assert.ok(unmeasured.includes('edit-unmeasured'))
 })
+
+test('message feedback submitted after the window closed still updates it', async () => {
+  const { dir, store } = await tempStore()
+  const ctx = fakeCtx()
+  const recorder = createRecorder(
+    ctx,
+    { windowToolCalls: 12, windowTtlMs: 60_000 },
+    {
+      store,
+      resolveSkill: async () => ({
+        summary: { name: 'pdf-tools', description: 'Use when converting PDFs.' },
+        definition: { content: '# PDF tools' },
+      }),
+    },
+  )
+  try {
+    loadSkill(ctx, 'pdf-tools', 'late-1')
+    sessionEvent(ctx, 'assistant/message', {
+      message: { id: 'msg-late', source: { provider: 'deepseek', model: 'v4' } },
+      usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0 },
+    })
+    ctx.emit('agent/turn-stopping', { agent })
+    // The next user message closes the window, before any rating is submitted.
+    ctx.emit('agent/inbox/claimed', {
+      agent,
+      message: { content: [{ type: 'text', text: 'now do something else' }] },
+    })
+    let records = await settle(store)
+    const closed = records.filter((record) => record.t === 'window').at(-1) as Fake | undefined
+    assert.ok(closed)
+    assert.equal(closed.closeReason, 'user-turn')
+    assert.equal(closed.feedback?.positive ?? 0, 0)
+
+    // The UI allows rating a finalized message after the next turn started.
+    sessionEvent(ctx, 'feedback/message-put', {
+      sessionId: 'session-1',
+      item: { messageId: 'msg-late', rating: 'positive', category: 'task-result' },
+    })
+    records = await settle(store)
+    const updated = records.filter((record) => record.t === 'window' && record.windowId === closed.windowId).at(-1) as
+      Fake | undefined
+    assert.ok(updated)
+    assert.equal(updated.feedback?.positive, 1)
+    assert.equal(updated.feedback?.categories['task-result'], 1)
+    assert.equal(updated.closeReason, 'user-turn')
+    const group = foldSamples(records).find((entry) => entry.skill === 'pdf-tools')
+    assert.ok(group)
+    const sample = group.samples.at(-1)
+    assert.equal(sample?.window?.feedback?.positive, 1)
+  } finally {
+    await recorder.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

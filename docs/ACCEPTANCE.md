@@ -1,7 +1,7 @@
 # Acceptance report — dsh-skill-eval 1.20.0
 
 > **Historical snapshot — 1.20.0.** The current **1.24.0** release passes
-> **334 tests**, ships a 55-file tarball, and reports empty telemetry,
+> **339 tests**, ships a 56-file tarball, and reports empty telemetry,
 > snapshots and turn boards as **SKIP** on a fresh profile instead of failing. The numbers
 > and file names below record the 1.20.0 acceptance run.
 

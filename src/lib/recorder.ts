@@ -234,6 +234,19 @@ export function createRecorder(
   // them instead of being handed to whichever loaded last.
   const sessions = new Map<string, SessionState>() // sessionId -> { windows: [] }
   const sessionMeta = new Map<string, SessionMeta>()
+  // Windows already persisted and removed from the active set. Message feedback
+  // is submitted from the UI after a turn ends, frequently after the next user
+  // message has already closed the window. Keeping a bounded index lets that
+  // late rating update the persisted window instead of being dropped.
+  const retired = new Map<string, { window: LiveWindow; reason: string }>()
+  const RETIRED_LIMIT = 500
+  function retire(w: LiveWindow, reason: string): void {
+    retired.set(w.windowId, { window: w, reason })
+    if (retired.size > RETIRED_LIMIT) {
+      const oldest = retired.keys().next().value
+      if (oldest !== undefined) retired.delete(oldest)
+    }
+  }
 
   function metaFor(sessionId: string): SessionMeta {
     const existing = sessionMeta.get(sessionId)
@@ -339,7 +352,10 @@ export function createRecorder(
     if (!state || state.windows.length === 0) return
     const closing = state.windows.filter((w) => w !== except)
     state.windows = except ? [except] : []
-    for (const w of closing) persist(w, reason)
+    for (const w of closing) {
+      persist(w, reason)
+      retire(w, reason)
+    }
   }
 
   function openWindow(
@@ -996,6 +1012,11 @@ export function createRecorder(
               note: typeof item.note === 'string' && item.note.trim().length > 0 ? item.note.slice(0, 300) : null,
             })
             for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            for (const entry of retired.values()) {
+              if (!entry.window.messageIds.includes(messageId)) continue
+              refreshFeedback(entry.window)
+              persist(entry.window, entry.reason)
+            }
             break
           }
           case 'feedback/message-delete': {
@@ -1003,6 +1024,11 @@ export function createRecorder(
             if (!messageId) break
             feedbackByMessage.delete(`${sessionId}|${messageId}`)
             for (const w of windows) if (w.messageIds.includes(messageId)) refreshFeedback(w)
+            for (const entry of retired.values()) {
+              if (!entry.window.messageIds.includes(messageId)) continue
+              refreshFeedback(entry.window)
+              persist(entry.window, entry.reason)
+            }
             break
           }
           case 'feedback/record': {

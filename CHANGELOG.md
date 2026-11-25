@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.24.1 — late message feedback
+
+- **Fix: feedback submitted after the window closed was dropped.** Like/Dislike
+  is recorded from the UI after a turn ends, often after the next user message
+  has already closed the skill window. The recorder kept only active windows, so
+  that rating never reached the persisted window. Closed windows are now kept in
+  a bounded index and a late rating re-persists the window with its original
+  close reason; deleting a rating does the same.
+- Regression test covers the full open → turn-end → next-user-message → rating
+  sequence. **339 tests passing.**
+
 ## Unreleased
 
 - **`npm run e2e` real-turn acceptance harness.** Creates a disposable headless
